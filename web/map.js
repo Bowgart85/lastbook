@@ -7,6 +7,7 @@ const MapView = (() => {
   let HOME = null;   // a household's own opening place, from web/home-area.json: a local file never packaged. "Set as my area" wins over it.
   const IN_WINDOW = location.protocol === 'lastbook:' || location.hostname === 'lastbook.invalid';
   const US = [-124.8, 24.4, -66.9, 49.4];  // lower 48
+  const METRIC = !/-(US|LR|MM)$/i.test(navigator.language || 'en-US');  // feet and miles only where they are the everyday units
   const FULL = ['<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>', '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'];   // full screen, and leave it
   const C = { land: '#f2efe6', ocean: '#aad3df', water: '#aad3df', wet: '#cfe3d4', beach: '#f4e7b6',
     park: '#cfe7c2', playa: '#ece4cf', green: '#d5e8c6', farm: '#eceac6', res: '#ebe7de', com: '#f1e2df', ind: '#e8e1ea', bldg: '#d9d0c3', bldgLine: '#c6bcae',
@@ -520,7 +521,7 @@ const MapView = (() => {
     g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(w / 2 - 7, h / 2); g.lineTo(w / 2 + 7, h / 2); g.moveTo(w / 2, h / 2 - 7); g.lineTo(w / 2, h / 2 + 7); g.stroke();
     const mpp = 156543.03 * Math.cos(st.lat * Math.PI / 180) / 2 ** st.z;
     const nice = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000].find(m => m / mpp > 60) || 100000;
-    const el = $('mscale'); if (el) el.innerHTML = `<span style="display:inline-block;width:${Math.round(nice / mpp)}px;border:2px solid #333;border-top:0;height:6px;vertical-align:middle"></span> ${nice >= 1000 ? nice / 1000 + ' km' : nice + ' m'} · ${(nice / 1609.34 < 1 ? Math.round(nice * 3.281) + ' ft' : (nice / 1609.34).toFixed(nice < 5000 ? 1 : 0) + ' mi')}`;
+    const el = $('mscale'); if (el) el.innerHTML = `<span style="display:inline-block;width:${Math.round(nice / mpp)}px;border:2px solid #333;border-top:0;height:6px;vertical-align:middle"></span> ${nice >= 1000 ? nice / 1000 + ' km' : nice + ' m'}${METRIC ? '' : ' · ' + (nice / 1609.34 < 1 ? Math.round(nice * 3.281) + ' ft' : (nice / 1609.34).toFixed(nice < 5000 ? 1 : 0) + ' mi')}`;
     const at = el && el.parentNode.querySelector('.mapattr'); if (at) at.style.maxWidth = Math.max(120, el.parentNode.clientWidth - el.offsetWidth - 34) + 'px';   // the credits wrap before they reach the scale bar, however long it is
   }
 
@@ -583,10 +584,11 @@ const MapView = (() => {
     }
     g.putImageData(img, 0, 0); return t.shade = c;
   }
-  const CONTOUR = [[11, 200, 1000], [12, 100, 500], [13, 40, 200], [15, 20, 100], [16, 5, 25]];  // [from zoom, interval ft, index ft]; 5 ft only on lidar
+  const CONTOUR = METRIC ? [[11, 50, 250], [12, 25, 100], [13, 10, 50], [15, 5, 25], [16, 2, 10]]  // metres
+    : [[11, 200, 1000], [12, 100, 500], [13, 40, 200], [15, 20, 100], [16, 5, 25]];  // [from zoom, interval ft, index ft]; the finest only on lidar
   function contours(t, step) {
     if (t.contours[step]) return t.contours[step];
-    const h = t.h, ft = 3.28084, lines = [];  // marching squares on the 256x256 grid, in feet
+    const h = t.h, ft = METRIC ? 1 : 3.28084, lines = [];  // marching squares on the 256x256 grid, in feet (metres when METRIC)
     let lo = Infinity, hi = -Infinity; for (let i = 0; i < 65536; i++) { const v = h[i] * ft; if (v < lo) lo = v; if (v > hi) hi = v }
     for (let lev = Math.ceil(lo / step) * step; lev <= hi; lev += step) {
       if (lev <= 0) continue;
@@ -649,7 +651,7 @@ const MapView = (() => {
         for (const L of contours(t, step)) { if (!L.index) continue; const a = L.seg;
           for (let i = 0; i < a.length && placed.length < 24; i += 4 * 61) { const x = sx + a[i] * k, y = sy + a[i + 1] * k; if (x < 40 || x > w - 70 || y < 70 || y > h - 50) continue;
             if (placed.some(p => Math.abs(p[0] - x) < 130 && Math.abs(p[1] - y) < 70)) continue; placed.push([x, y]);
-            const s = L.lev.toLocaleString() + ' ft'; g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,.85)'; g.strokeText(s, x, y); g.fillStyle = 'rgba(120,76,36,.95)'; g.fillText(s, x, y) } }
+            const s = L.lev.toLocaleString() + (METRIC ? ' m' : ' ft'); g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,.85)'; g.strokeText(s, x, y); g.fillStyle = 'rgba(120,76,36,.95)'; g.fillText(s, x, y) } }
       }
       g.restore();
     }
@@ -746,7 +748,7 @@ const MapView = (() => {
     }
     return st ? elevAt(lat, lon) : null;
   }
-  const fmtElev = m => `${Math.round(m * 3.28084).toLocaleString()} ft (${Math.round(m).toLocaleString()} m)`;
+  const fmtElev = m => METRIC ? `${Math.round(m).toLocaleString()} m` : `${Math.round(m * 3.28084).toLocaleString()} ft (${Math.round(m).toLocaleString()} m)`;
 
   // ------------------------------------------------------------------ card ----
   function openCard(html) {
@@ -853,7 +855,7 @@ const MapView = (() => {
       const r = await fetch(`/api/map/near?lat=${st.lat}&lon=${st.lon}&cls=${ks.join(',')}&limit=${Math.max(3, Math.ceil(14 / ks.length))}`).then(r => r.json());
       if (st !== state || serial !== st.serial.near) return;
       box.classList.remove('busy');
-      if (!Array.isArray(r) || !r.length) { box.innerHTML = '<p class="muted small">Nothing from your layers within about 100 miles of the map center.</p>'; return }
+      if (!Array.isArray(r) || !r.length) { box.innerHTML = '<p class="muted small">Nothing from your layers within about ' + (METRIC ? '160 km' : '100 miles') + ' of the map center.</p>'; return }
       const list = r.sort((a, b) => a.km - b.km).slice(0, 14);
       box.innerHTML = list.map((p, i) => `<button data-i="${i}">${sym(layerOf(p.cls), 24)}<span><b>${escH(unnamed(p))}</b><small>${escH(layerOf(p.cls).label)} · ${dist(p.km)} ${escH(p.dir)}</small>${p.detail ? `<small>${escH(p.detail)}</small>` : ''}</span></button>`).join('');
       box.querySelectorAll('button').forEach(b => b.onclick = () => {
@@ -872,7 +874,7 @@ const MapView = (() => {
       const r = await fetch('/api/places?q=' + encodeURIComponent(q) + `&near=${st.lat.toFixed(3)},${st.lon.toFixed(3)}`).then(r => r.json());
       if (st !== state || serial !== st.serial.place) return;
       if (!r.length) { const address = /^\s*\d[\w-]*\s+\S/.test(q); box.innerHTML = '<p class="muted small" style="padding:8px">' + (address ? 'Address not found in your offline data. Check the house number and street.' + (IN_WINDOW ? ' <a href="/ui/setup.html#manage">Add your state’s address search</a>.' : '') : 'No place by that name in the saved gazetteers. Try a town, county or 5-digit ZIP.') + '</p>'; return }
-      const pick = p => { box.hidden = true; st.mark = { lat: p.lat, lon: p.lon, name: p.name, kind: p.kind, detail: p.detail }; closeCard(); go(p.lat, p.lon, /county/i.test(p.kind) ? 10 : /ZIP|city|town|populated|^(Lake|Reservoir)$/i.test(p.kind) ? 13 : 15); st.cv.focus() };
+      const pick = p => { box.hidden = true; st.mark = { lat: p.lat, lon: p.lon, name: p.name, kind: p.kind, detail: p.detail }; closeCard(); go(p.lat, p.lon, /county|district/i.test(p.kind) ? 10 : /ZIP|postal|city|town|village|suburb|municipality|populated|^(Lake|Reservoir)$/i.test(p.kind) ? 13 : 15); st.cv.focus() };
       box.innerHTML = `<div class="small muted" style="padding:4px 8px">${r.length} match${r.length === 1 ? '' : 'es'}</div>` + r.map((p, i) => `<button data-i="${i}"><b>${escH(p.name)}</b><small>${escH(p.kind)} · ${escH(p.detail)}</small></button>`).join('');
       box.querySelectorAll('button').forEach(b => b.onclick = () => pick(r[+b.dataset.i]));
       if (r.length === 1) pick(r[0]);

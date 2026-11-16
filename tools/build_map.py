@@ -3,9 +3,13 @@
 map database the app can draw offline.
 
   python3 tools/build_map.py derived/geo/socal.gpkg derived/geo/map.sqlite
+  python3 tools/build_map.py hessen.gpkg derived/geo/map.sqlite --source "... hessen-latest-free.gpkg.zip (ODbL 1.0)" --as-of 2026-11-01
 
 Input is a copy extracted from library-data/geography/openstreetmap/socal-latest-free.gpkg.zip;
-the original archive is only read. Output tables:
+the original archive is only read. Any Geofabrik "free" GeoPackage has the same tables, so another region
+works the same way: --source and --as-of name it in the map's details, and its bounds are measured from the
+data (--bounds W,S,E,N overrides). With none of the three, the Southern California values are written as before.
+Output tables:
   feat(id, layer, cls, name, minz, geom)   geom = packed int32 lon/lat * 1e6 (see pack())
   feat_idx (R*Tree on bbox)
   poi(id, cls, name, lon, lat)             help-relevant points (hospitals, pharmacies, water...)
@@ -15,6 +19,9 @@ import math, sqlite3, struct, sys, time
 from array import array
 
 SRC, DST = sys.argv[1], sys.argv[2]
+OPT = dict(zip(sys.argv[3::2], sys.argv[4::2]))     # --source, --as-of, --bounds
+if set(OPT) - {'--source', '--as-of', '--bounds'} or len(sys.argv) % 2 == 0:
+    sys.exit('usage: build_map.py SRC.gpkg DST.sqlite [--source TEXT] [--as-of DATE] [--bounds W,S,E,N]')
 Q = 1e6
 
 ROAD_Z = {'motorway': 5, 'trunk': 6, 'motorway_link': 10, 'trunk_link': 10, 'primary': 8, 'primary_link': 12,
@@ -195,10 +202,15 @@ def main():
             pid += 1
             dst.execute('INSERT INTO poi VALUES (?,?,?,?,?)', (pid, cls, name, (minx + maxx) / 2, (miny + maxy) / 2))
     dst.execute('CREATE INDEX poi_cls ON poi(cls, lon, lat)')
-    dst.executemany('INSERT INTO meta VALUES (?,?)', [
-        ('source', 'OpenStreetMap contributors, via Geofabrik socal-latest-free.gpkg.zip (ODbL 1.0)'),
-        ('data_as_of', '2026-10-25T21:21:21Z'),
-        ('bounds', '-121.36,32.50,-114.10,35.89'),
+    if OPT:     # another region: what the caller says, and the box the features really fall in
+        box = dst.execute('SELECT MIN(minx),MIN(miny),MAX(maxx),MAX(maxy) FROM feat_idx').fetchone()
+        measured = ','.join('%.2f' % v for v in box) if box[0] is not None else ''
+        described = [('source', OPT.get('--source', 'OpenStreetMap contributors, via Geofabrik (ODbL 1.0)')),
+                     ('data_as_of', OPT.get('--as-of', '')), ('bounds', OPT.get('--bounds', measured))]
+    else:
+        described = [('source', 'OpenStreetMap contributors, via Geofabrik socal-latest-free.gpkg.zip (ODbL 1.0)'),
+                     ('data_as_of', '2026-10-25T21:21:21Z'), ('bounds', '-121.36,32.50,-114.10,35.89')]
+    dst.executemany('INSERT INTO meta VALUES (?,?)', described + [
         ('built', time.strftime('%Y-%m-%dT%H:%M:%S')),
     ])
     dst.commit()

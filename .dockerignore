@@ -1,0 +1,8 @@
+.git
+derived
+library-data
+website
+website-next
+packaging
+!packaging/linux/requirements_linux.txt
+**/__pycache__

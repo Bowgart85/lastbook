@@ -1631,7 +1631,9 @@ def pack_datasets(have):
     else:
         out.append({'label': 'No street detail or help points', 'status': 'This download has only the base map. Hospitals, water taps and side streets are not in it.'})
     if PLACEDB.exists():
-        out.append({'label': 'Place names (USGS GNIS, Census 2025 ZIP codes and counties)', 'status': 'Used by "Find a town, ZIP or place"'})
+        holds = _distinct(PLACEDB, "SELECT value FROM meta WHERE key='holds'")  # a region built by tools/build_places_osm.py says what it holds
+        out.append({'label': f'Place names ({holds[0]})' if holds else 'Place names (USGS GNIS, Census 2025 ZIP codes and counties)',
+                    'status': 'Used by "Find a town, ZIP or place"'})
     if TERRAINDB.exists():
         out.append({'label': 'Elevation (USGS 3DEP)', 'status': 'Shaded relief. Contour lines only where this map has fine detail.' if have['detail'] else 'Shaded relief at broad zoom levels'})
     if BLDGDB.exists():

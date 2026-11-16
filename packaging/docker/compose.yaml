@@ -1,0 +1,19 @@
+# Lastbook on a home server. Set LASTBOOK_DATA to the data folder (the unpacked pack), then:
+#
+#   LASTBOOK_DATA=/srv/LastbookData docker compose -f packaging/docker/compose.yaml up -d --build
+#   docker compose -f packaging/docker/compose.yaml logs lastbook      # shows the access link's key
+#
+# Open http://<this computer's IP>:8890/?key=<key> once on each phone; it is remembered for a year.
+# Use the IP address, not a host name: the server refuses requests addressed to a name.
+# The address printed in the log is the container's own, not this computer's.
+# Keep this on the home network. Do not forward the port to the internet.
+services:
+  lastbook:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8890:8890"
+    volumes:
+      - "${LASTBOOK_DATA:?set LASTBOOK_DATA to the Lastbook data folder}:/data"

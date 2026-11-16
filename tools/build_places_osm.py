@@ -73,32 +73,42 @@ def from_pbf(db, path, label, district_level, municipality_level):
     wanted = {str(district_level): 'district', str(municipality_level): 'municipality'}
     found = []
 
-    class Areas(osmium.SimpleHandler):
-        def area(self, a):
-            tags = a.tags
-            boundary = tags.get('boundary')
-            if boundary == 'postal_code':
-                code = (tags.get('postal_code') or '').strip()
-                if not code:
-                    return
-                # Germany's postal code relations carry note="35418 Buseck": the part after the code says where it is
-                where = re.sub(r'^\s*%s\s*' % re.escape(code), '', tags.get('note') or '').strip()
-                name, kind, detail = code, 'postal code', f'{where}, {label}' if where else label
-            elif boundary == 'administrative' and tags.get('admin_level') in wanted and tags.get('name'):
-                name, kind, detail = tags['name'], wanted[tags['admin_level']], label
-            else:
+    def area(a):
+        tags = a.tags
+        boundary = tags.get('boundary')
+        if boundary == 'postal_code':
+            code = (tags.get('postal_code') or '').strip()
+            if not code:
                 return
-            best = None
-            for outer in a.outer_rings():
-                ring = [(n.lon, n.lat) for n in outer if n.location.valid()]
-                if len(ring) >= 4:
-                    c = centroid(ring)
-                    if best is None or c[2] > best[2]:
-                        best = c
-            if best:
-                found.append((name, kind, spelled(name, detail), best[1], best[0], 2, OSM))
+            # Germany's postal code relations carry note="35418 Buseck": the part after the code says where it is
+            where = re.sub(r'^\s*%s\s*' % re.escape(code), '', tags.get('note') or '').strip()
+            name, kind, detail = code, 'postal code', f'{where}, {label}' if where else label
+        elif boundary == 'administrative' and tags.get('admin_level') in wanted and tags.get('name'):
+            name, kind, detail = tags['name'], wanted[tags['admin_level']], label
+        else:
+            return
+        best = None
+        for outer in a.outer_rings():
+            ring = [(n.lon, n.lat) for n in outer if n.location.valid()]
+            if len(ring) >= 4:
+                c = centroid(ring)
+                if best is None or c[2] > best[2]:
+                    best = c
+        if best:
+            found.append((name, kind, spelled(name, detail), best[1], best[0], 2, OSM))
 
-    Areas().apply_file(str(path), locations=True, idx='flex_mem')
+    if hasattr(osmium, 'FileProcessor') and hasattr(osmium, 'filter'):
+        # Only boundaries are put together as areas: without the filter every building and lake of the extract is too
+        wanted_key = osmium.filter.KeyFilter('boundary')
+        for obj in osmium.FileProcessor(str(path)).with_areas(wanted_key).with_filter(wanted_key):
+            if obj.is_area():
+                area(obj)
+    else:       # an older pyosmium: the same result, slowly
+        class Areas(osmium.SimpleHandler):
+            def area(self, a):
+                area(a)
+
+        Areas().apply_file(str(path), locations=True, idx='flex_mem')
     # A municipality crossing the extract's edge, or one mapped twice, shows up more than once: keep one per name and spot
     seen = set()
     n = 0

@@ -62,23 +62,37 @@ def main():
         total[0] += len(batch)
         batch.clear()
 
-    class Addresses(osmium.SimpleHandler):
-        def node(self, n):
-            if 'addr:housenumber' in n.tags and n.location.valid():
-                batch.extend(rows_of(n.tags, n.location.lat, n.location.lon, a.code))
-                if len(batch) >= 100_000:
-                    flush()
+    def node(n):
+        if 'addr:housenumber' in n.tags and n.location.valid():
+            batch.extend(rows_of(n.tags, n.location.lat, n.location.lon, a.code))
+            if len(batch) >= 100_000:
+                flush()
 
-        def way(self, w):
-            if 'addr:housenumber' not in w.tags:
-                return
-            pts = [(n.lat, n.lon) for n in w.nodes if n.location.valid()]
-            if pts:
-                if len(pts) > 1 and pts[0] == pts[-1]:
-                    pts = pts[:-1]      # a closed outline names its first corner twice
-                batch.extend(rows_of(w.tags, sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts), a.code))
+    def way(w):
+        if 'addr:housenumber' not in w.tags:
+            return
+        pts = [(n.lat, n.lon) for n in w.nodes if n.location.valid()]
+        if pts:
+            if len(pts) > 1 and pts[0] == pts[-1]:
+                pts = pts[:-1]      # a closed outline names its first corner twice
+            batch.extend(rows_of(w.tags, sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts), a.code))
 
-    Addresses().apply_file(str(a.pbf), locations=True, idx='flex_mem')
+    if hasattr(osmium, 'FileProcessor') and hasattr(osmium, 'filter'):
+        # Only objects with a house number reach Python; the rest of the extract is skipped inside the reader
+        for obj in osmium.FileProcessor(str(a.pbf)).with_locations().with_filter(osmium.filter.KeyFilter('addr:housenumber')):
+            if obj.is_node():
+                node(obj)
+            elif obj.is_way():
+                way(obj)
+    else:       # an older pyosmium: the same result, slowly
+        class Addresses(osmium.SimpleHandler):
+            def node(self, n):
+                node(n)
+
+            def way(self, w):
+                way(w)
+
+        Addresses().apply_file(str(a.pbf), locations=True, idx='flex_mem')
     flush()
     print(f'{total[0]:,} addresses, {time.time() - t0:.0f}s; indexing', flush=True)
     db.execute('CREATE INDEX addr_norm ON addr(norm, num)')

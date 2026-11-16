@@ -1,0 +1,8 @@
+{
+  "code": "SN",
+  "label": "Sachsen",
+  "gpkg_url": "https://download.geofabrik.de/europe/germany/sachsen-latest-free.gpkg.zip",
+  "pbf_url": "https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf",
+  "source": "OpenStreetMap contributors, via Geofabrik sachsen-latest-free.gpkg.zip (ODbL 1.0)",
+  "admin_levels": "6,8"
+}

@@ -1,0 +1,8 @@
+{
+  "code": "TH",
+  "label": "Thüringen",
+  "gpkg_url": "https://download.geofabrik.de/europe/germany/thueringen-latest-free.gpkg.zip",
+  "pbf_url": "https://download.geofabrik.de/europe/germany/thueringen-latest.osm.pbf",
+  "source": "OpenStreetMap contributors, via Geofabrik thueringen-latest-free.gpkg.zip (ODbL 1.0)",
+  "admin_levels": "6,8"
+}

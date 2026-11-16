@@ -1,0 +1,8 @@
+{
+  "code": "BE",
+  "label": "Berlin",
+  "gpkg_url": "https://download.geofabrik.de/europe/germany/berlin-latest-free.gpkg.zip",
+  "pbf_url": "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf",
+  "source": "OpenStreetMap contributors, via Geofabrik berlin-latest-free.gpkg.zip (ODbL 1.0)",
+  "admin_levels": "6,8"
+}

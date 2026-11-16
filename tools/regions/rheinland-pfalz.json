@@ -1,0 +1,8 @@
+{
+  "code": "RP",
+  "label": "Rheinland-Pfalz",
+  "gpkg_url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest-free.gpkg.zip",
+  "pbf_url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf",
+  "source": "OpenStreetMap contributors, via Geofabrik rheinland-pfalz-latest-free.gpkg.zip (ODbL 1.0)",
+  "admin_levels": "6,8"
+}

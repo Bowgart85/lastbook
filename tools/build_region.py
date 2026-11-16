@@ -1,25 +1,33 @@
 #!/usr/bin/env python3
-"""Build one region's detailed map from OpenStreetMap and put it into a Lastbook data folder.
+"""Build a detailed map of one or more regions from OpenStreetMap and put it into a Lastbook data folder.
 
   python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data ~/LastbookData
-  python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work              # build only, install nothing
-  python3 tools/build_region.py ... --gpkg region.gpkg --pbf region.osm.pbf                   # files already here: nothing is downloaded
+  python3 tools/build_region.py tools/regions/hessen.json tools/regions/bayern.json --work ... --data ...   # one map of both
+  python3 tools/build_region.py --geofabrik europe/france/alsace:Alsace --work ... --data ...               # no region file
+  python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work                            # build only
+  python3 tools/build_region.py ... --gpkg region.gpkg --pbf region.osm.pbf     # one region, files already here
 
-For a region outside the US, where packaging/state_maps.py has no data. A region file names the two Geofabrik
-downloads (the "free" GeoPackage and the raw .osm.pbf), a label and a short code. The steps:
+For regions outside the US, where packaging/state_maps.py has no data. A region is two Geofabrik downloads: the
+"free" GeoPackage and the raw .osm.pbf. A region file names them with a label and a short code; --geofabrik
+PATH:LABEL works them out from the region's path on download.geofabrik.de. Geofabrik offers the GeoPackage only
+for regions below a size limit: a large country is built from its parts (Germany from its 16 states, all in
+tools/regions/).
 
-  1 download   both files into the work folder, unless they are there or --gpkg / --pbf name them
+  1 download   both files of each region into the work folder, unless they are already there
   2 streets    tools/build_map.py         -> <work>/out/map.sqlite     roads, land, water, buildings, help points
   3 places     tools/build_places_osm.py  -> <work>/out/places.sqlite  places, postal codes, municipalities, districts
   4 install    with --data: the two files go to <data>/derived/geo/, what they replace moves to <work>/replaced-<time>/,
                the map's cached answers are cleared, and map-set.json is written so the app's own check of the
                library accepts the new map (engine/setup/install.py check_map).
 
-The app must be closed while step 4 runs. Terrain, building heights, waterbody outlines beyond the street map's
-own, and street addresses are not built here. The place finder is replaced, so US place names are no longer in it.
+The app must be closed while step 4 runs. Terrain, building heights and street addresses are not built here.
+The place finder is replaced, so US place names are no longer in it. Size: every region adds its whole street
+network. A German state is a few hundred MB to a few GB as a built map; all of Europe at this detail is far
+more than a phone-sized pack and has not been tried.
 """
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +38,19 @@ from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS.parent))
+GEOFABRIK = 'https://download.geofabrik.de/'
+
+
+def geofabrik(spec):
+    """'europe/france/alsace:Alsace' -> a region, as a region file would give it."""
+    path, _, label = spec.partition(':')
+    path = path.strip('/')
+    if '//' in spec or not re.fullmatch(r'[a-z0-9-]+(/[a-z0-9-]+)*', path):     # a pasted URL is not a path
+        sys.exit(f'--geofabrik takes a path such as europe/germany/hessen, not {spec!r}')
+    slug = path.rsplit('/', 1)[-1]
+    return {'code': slug, 'label': label or slug.replace('-', ' ').title(),
+            'gpkg_url': f'{GEOFABRIK}{path}-latest-free.gpkg.zip', 'pbf_url': f'{GEOFABRIK}{path}-latest.osm.pbf',
+            'source': f'OpenStreetMap contributors, via Geofabrik {slug}-latest-free.gpkg.zip (ODbL 1.0)'}
 
 
 def fetch(url, dest):
@@ -91,37 +112,54 @@ def install(out, data, work, code):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('region', help='a region file such as tools/regions/hessen.json')
+    ap.add_argument('regions', nargs='*', help='region files such as tools/regions/hessen.json')
+    ap.add_argument('--geofabrik', action='append', default=[], metavar='PATH[:LABEL]',
+                    help='a region by its path on download.geofabrik.de, such as europe/france/alsace:Alsace; may be repeated')
     ap.add_argument('--work', required=True, help='folder for downloads and built files (several GB for a German state)')
     ap.add_argument('--data', help='Lastbook data folder to install into; without it the map is only built')
-    ap.add_argument('--gpkg', help='a Geofabrik "free" .gpkg or .gpkg.zip already on this computer')
-    ap.add_argument('--pbf', help='the region\'s .osm.pbf (or .osm) already on this computer')
+    ap.add_argument('--label', help='what the whole map is called when it has several regions (default: their labels, joined)')
+    ap.add_argument('--gpkg', help='one region only: a Geofabrik "free" .gpkg or .gpkg.zip already on this computer')
+    ap.add_argument('--pbf', help='one region only: its .osm.pbf (or .osm) already on this computer')
     ap.add_argument('--no-boundaries', action='store_true', help='skip postal codes, municipalities and districts (no .osm.pbf, no osmium needed)')
     a = ap.parse_args()
-    region = json.loads(Path(a.region).read_text(encoding='utf-8'))
-    work = Path(a.work).expanduser().resolve()
-    out = work / 'out'
-    out.mkdir(parents=True, exist_ok=True)
-
-    gpkg = Path(a.gpkg).expanduser() if a.gpkg else fetch(region['gpkg_url'], work / region['gpkg_url'].rsplit('/', 1)[1])
-    as_of = time.strftime('%Y-%m-%d', time.gmtime(gpkg.stat().st_mtime))
-    gpkg = gpkg_from(gpkg, work)
-    pbf = None
+    regions = [json.loads(Path(r).read_text(encoding='utf-8')) for r in a.regions] + [geofabrik(g) for g in a.geofabrik]
+    if not regions:
+        ap.error('name at least one region file or --geofabrik region')
+    if (a.gpkg or a.pbf) and len(regions) != 1:
+        ap.error('--gpkg and --pbf are for a single region')
     if not a.no_boundaries:
         try:
             import osmium  # noqa: F401
         except ImportError:
             sys.exit('Postal codes and boundaries need the osmium package (pip install osmium), or pass --no-boundaries.')
-        pbf = Path(a.pbf).expanduser() if a.pbf else fetch(region['pbf_url'], work / region['pbf_url'].rsplit('/', 1)[1])
+    work = Path(a.work).expanduser().resolve()
+    out = work / 'out'
+    out.mkdir(parents=True, exist_ok=True)
+    label = a.label or ', '.join(r['label'] for r in regions)
+    code = '+'.join(r['code'] for r in regions) if len(regions) <= 4 else f"{regions[0]['code']}+{len(regions) - 1}"
 
-    run(TOOLS / 'build_map.py', gpkg, out / 'map.sqlite', '--source', region['source'], '--as-of', as_of)
-    places = [TOOLS / 'build_places_osm.py', '--map', out / 'map.sqlite', '--out', out / 'places.sqlite', '--label', region['label'],
-              '--levels', region.get('admin_levels', '6,8')]
-    run(*places, *(['--pbf', pbf] if pbf else []))
+    # Everything is downloaded before anything is built: a missing file should stop the run before hours of work, not after
+    got = []
+    for r in regions:
+        gpkg = Path(a.gpkg).expanduser() if a.gpkg else fetch(r['gpkg_url'], work / r['gpkg_url'].rsplit('/', 1)[1])
+        pbf = None
+        if not a.no_boundaries:
+            pbf = Path(a.pbf).expanduser() if a.pbf else fetch(r['pbf_url'], work / r['pbf_url'].rsplit('/', 1)[1])
+        got.append((r, gpkg, pbf))
+
+    places = [TOOLS / 'build_places_osm.py', '--map', out / 'map.sqlite', '--out', out / 'places.sqlite', '--label', label,
+              '--levels', regions[0].get('admin_levels', '6,8')]
+    for i, (r, gpkg, pbf) in enumerate(got):
+        as_of = time.strftime('%Y-%m-%d', time.gmtime(gpkg.stat().st_mtime))
+        print('streets:', r['label'], flush=True)
+        run(TOOLS / 'build_map.py', gpkg_from(gpkg, work), out / 'map.sqlite', '--source', r['source'], '--as-of', as_of, *(['--append'] if i else []))
+        if pbf:
+            places += ['--pbf', f"{pbf}={r['label']}"]
+    run(*places)
     for name in ('map.sqlite', 'places.sqlite'):
         print(name, f'{(out / name).stat().st_size / 1e6:.1f} MB', flush=True)
     if a.data:
-        install(out, Path(a.data).expanduser().resolve(), work, region['code'])
+        install(out, Path(a.data).expanduser().resolve(), work, code)
 
 
 if __name__ == '__main__':

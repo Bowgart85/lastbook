@@ -3,6 +3,7 @@
 
   python3 tools/build_places_osm.py --map derived/geo/map.sqlite --out derived/geo/places.sqlite --label Hessen
   python3 tools/build_places_osm.py ... --pbf hessen-latest.osm.pbf        # adds postal codes, municipalities, districts
+  python3 tools/build_places_osm.py ... --label Deutschland --pbf hessen.osm.pbf=Hessen --pbf bayern.osm.pbf=Bayern
 
 tools/build_places.py does this for the US from USGS and Census files. This one writes the same two tables
 (place, place_fts), so the app reads either. What it finds:
@@ -15,6 +16,7 @@ tools/build_places.py does this for the US from USGS and Census files. This one 
     municipalities           boundary=administrative, admin_level 8       rank 2   kind "municipality"
     districts                boundary=administrative, admin_level 6       rank 2   kind "district"
 
+--pbf may be given once per extract; FILE=NAME files that extract's areas under NAME instead of --label.
 The admin levels are Germany's (6 Kreis, 8 Gemeinde); --levels DISTRICT,MUNICIPALITY changes them.
 An area is filed at the centroid of its largest outer ring. Both inputs are only read.
 The search folds ä to a by itself but not ß to ss, so a name with ß carries its ss spelling beside it ("· Giessen").
@@ -114,7 +116,8 @@ def main():
     ap.add_argument('--map', required=True, help='map.sqlite made by tools/build_map.py')
     ap.add_argument('--out', required=True, help='places.sqlite to write (replaced if it exists)')
     ap.add_argument('--label', required=True, help='what the region is called beside each result, such as Hessen')
-    ap.add_argument('--pbf', help='the region\'s .osm.pbf, for postal codes, municipalities and districts')
+    ap.add_argument('--pbf', action='append', default=[], metavar='FILE[=NAME]',
+                    help='a region\'s .osm.pbf, for postal codes, municipalities and districts; may be repeated')
     ap.add_argument('--levels', default='6,8', help='admin_level of districts and of municipalities (default 6,8)')
     a = ap.parse_args()
     district, municipality = (int(v) for v in a.levels.split(','))
@@ -124,9 +127,10 @@ def main():
     db.executescript(SCHEMA)
     n = from_map(db, a.map, a.label)
     print('from the street map', n, flush=True)
-    if a.pbf:
-        m = from_pbf(db, a.pbf, a.label, district, municipality)
-        print('postal codes, municipalities and districts', m, flush=True)
+    for item in a.pbf:
+        path, _, name = item.partition('=') if '=' in Path(item).name else (item, '', '')
+        m = from_pbf(db, path, name or a.label, district, municipality)
+        print('postal codes, municipalities and districts', Path(path).name, m, flush=True)
         n += m
     db.execute("INSERT INTO place_fts(place_fts) VALUES ('rebuild')")
     kinds = 'places and help points' + (', postal codes, municipalities and districts' if a.pbf else '')

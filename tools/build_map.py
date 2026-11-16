@@ -9,6 +9,9 @@ Input is a copy extracted from library-data/geography/openstreetmap/socal-latest
 the original archive is only read. Any Geofabrik "free" GeoPackage has the same tables, so another region
 works the same way: --source and --as-of name it in the map's details, and its bounds are measured from the
 data (--bounds W,S,E,N overrides). With none of the three, the Southern California values are written as before.
+--append adds a second region to a map that is already built instead of starting it again: its features follow
+the ones there, and the bounds are measured over both. A road that crosses the border is in both extracts and
+is then stored twice; it draws the same.
 Output tables:
   feat(id, layer, cls, name, minz, geom)   geom = packed int32 lon/lat * 1e6 (see pack())
   feat_idx (R*Tree on bbox)
@@ -19,9 +22,11 @@ import math, sqlite3, struct, sys, time
 from array import array
 
 SRC, DST = sys.argv[1], sys.argv[2]
-OPT = dict(zip(sys.argv[3::2], sys.argv[4::2]))     # --source, --as-of, --bounds
-if set(OPT) - {'--source', '--as-of', '--bounds'} or len(sys.argv) % 2 == 0:
-    sys.exit('usage: build_map.py SRC.gpkg DST.sqlite [--source TEXT] [--as-of DATE] [--bounds W,S,E,N]')
+_rest = [a for a in sys.argv[3:] if a != '--append']
+APPEND = '--append' in sys.argv[3:]
+OPT = dict(zip(_rest[0::2], _rest[1::2]))     # --source, --as-of, --bounds
+if set(OPT) - {'--source', '--as-of', '--bounds'} or len(_rest) % 2:
+    sys.exit('usage: build_map.py SRC.gpkg DST.sqlite [--source TEXT] [--as-of DATE] [--bounds W,S,E,N] [--append]')
 Q = 1e6
 
 ROAD_Z = {'motorway': 5, 'trunk': 6, 'motorway_link': 10, 'trunk_link': 10, 'primary': 8, 'primary_link': 12,
@@ -130,13 +135,18 @@ def main():
     t0 = time.time()
     src = sqlite3.connect(SRC)
     dst = sqlite3.connect(DST)
-    dst.executescript('''PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;
+    before = {}
+    if APPEND:
+        before = dict(dst.execute('SELECT key,value FROM meta'))
+        dst.executescript('PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;')
+    else:
+        dst.executescript('''PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;
       DROP TABLE IF EXISTS feat; DROP TABLE IF EXISTS feat_idx; DROP TABLE IF EXISTS poi; DROP TABLE IF EXISTS meta;
       CREATE TABLE feat(id INTEGER PRIMARY KEY, layer TEXT, cls TEXT, name TEXT, minz INTEGER, geom BLOB);
       CREATE VIRTUAL TABLE feat_idx USING rtree(id, minx, maxx, miny, maxy, minz, maxz);
       CREATE TABLE poi(id INTEGER PRIMARY KEY, cls TEXT, name TEXT, lon REAL, lat REAL);
       CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);''')
-    fid = [0]
+    fid = [dst.execute('SELECT COALESCE(MAX(id),0) FROM feat').fetchone()[0]]
 
     def add(layer, cls, name, minz, parts):
         if not parts:
@@ -191,7 +201,7 @@ def main():
             if cls in ('city', 'town') and pop and int(pop) > 300000:
                 z = 5
             add('place', cls, name, z, parts)
-    pid = 0
+    pid = dst.execute('SELECT COALESCE(MAX(id),0) FROM poi').fetchone()[0]
     for table in ('gis_osm_pois_free', 'gis_osm_pois_a_free', 'gis_osm_natural_free', 'gis_osm_natural_a_free'):
         for parts, (cls, name) in each(table):
             if cls not in POI_KEEP:
@@ -201,16 +211,19 @@ def main():
             minx, maxx, miny, maxy = bbox(parts)
             pid += 1
             dst.execute('INSERT INTO poi VALUES (?,?,?,?,?)', (pid, cls, name, (minx + maxx) / 2, (miny + maxy) / 2))
-    dst.execute('CREATE INDEX poi_cls ON poi(cls, lon, lat)')
-    if OPT:     # another region: what the caller says, and the box the features really fall in
+    dst.execute('CREATE INDEX IF NOT EXISTS poi_cls ON poi(cls, lon, lat)')
+    if OPT or APPEND:     # another region: what the caller says, and the box the features really fall in
         box = dst.execute('SELECT MIN(minx),MIN(miny),MAX(maxx),MAX(maxy) FROM feat_idx').fetchone()
         measured = ','.join('%.2f' % v for v in box) if box[0] is not None else ''
-        described = [('source', OPT.get('--source', 'OpenStreetMap contributors, via Geofabrik (ODbL 1.0)')),
-                     ('data_as_of', OPT.get('--as-of', '')), ('bounds', OPT.get('--bounds', measured))]
+        source = OPT.get('--source', 'OpenStreetMap contributors, via Geofabrik (ODbL 1.0)')
+        if before.get('source') and source not in before['source'].split('; '):
+            source = before['source'] + '; ' + source
+        as_of = min(d for d in (before.get('data_as_of'), OPT.get('--as-of', '')) if d) if before.get('data_as_of') or OPT.get('--as-of') else ''
+        described = [('source', source), ('data_as_of', as_of), ('bounds', OPT.get('--bounds', measured))]
     else:
         described = [('source', 'OpenStreetMap contributors, via Geofabrik socal-latest-free.gpkg.zip (ODbL 1.0)'),
                      ('data_as_of', '2026-10-25T21:21:21Z'), ('bounds', '-121.36,32.50,-114.10,35.89')]
-    dst.executemany('INSERT INTO meta VALUES (?,?)', described + [
+    dst.executemany('INSERT OR REPLACE INTO meta VALUES (?,?)', described + [
         ('built', time.strftime('%Y-%m-%dT%H:%M:%S')),
     ])
     dst.commit()

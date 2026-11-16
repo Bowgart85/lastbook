@@ -65,3 +65,8 @@ allow. The Vulkan loader (`vulkan-1.dll`) comes with the graphics driver and is 
 The manuals, videos, encyclopedias and map data in the library packs are not part of this repository. Each pack has a
 Sources and permissions page with the publisher and terms of every item. The offline map uses OpenStreetMap data
 (ODbL, © OpenStreetMap contributors) and US government data such as USGS, NOAA and USACE, as credited on the map.
+
+A region map built with `tools/build_region.py` (for example a German state) is made only from OpenStreetMap data
+(ODbL 1.0, © OpenStreetMap contributors), downloaded as extracts from Geofabrik (download.geofabrik.de). It is built
+on the user's own computer and is not part of any pack. Anyone who passes such a map on must keep the
+OpenStreetMap credit and the ODbL terms with it.

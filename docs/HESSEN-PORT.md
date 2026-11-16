@@ -10,11 +10,11 @@ Etappe 1 ist als Code vorhanden und mit kleinen Testdaten geprüft. **Mit echten
 |---|---|---|
 | Straßenkarte für beliebige Region | `tools/build_map.py` (neue Optionen `--source`, `--as-of`, `--bounds`; ohne Optionen unverändert) | Test + Server liefert Kacheln |
 | Ortssuche aus OSM: Orte, Hilfepunkte, PLZ, Gemeinden, Kreise; „Giessen" findet „Gießen" | `tools/build_places_osm.py` | Test + `/api/places` |
-| Ein Befehl: laden, bauen, einspielen, `map-set.json` schreiben | `tools/build_region.py`, `tools/regions/hessen.json` | mit lokalen Testdateien; **Download nicht** |
+| Ein Befehl: laden, bauen, einspielen, `map-set.json` schreiben; mehrere Regionen in einer Karte | `tools/build_region.py`, `tools/regions/*.json` (alle 16 Bundesländer), `--geofabrik` für jede andere Region | Test mit zwei Regionen über lokale Dateien; **echter Download nicht** |
 | Metrische Anzeige außerhalb der USA (Maßstab, Höhen, Höhenlinien, 3D) | `web/map.js`, `web/terrain3d.js` | nur Syntaxprüfung, **nicht im Browser** |
 | Kartenpanel nennt die Ortsdaten der Region | `server.py` (`pack_datasets`) | `/api/map/info` |
 | Heimserver | `packaging/docker/Dockerfile`, `compose.yaml`, `.dockerignore` | Server lief mit genau diesen Dateien und Abhängigkeiten; **Image nicht gebaut** |
-| Tests | `app/tests/test_region_map.py` (5 Tests) | grün |
+| Tests | `app/tests/test_region_map.py` (9 Tests) | grün |
 
 Bestehende Tests: 319 gelaufen, 1 Fehler in `test_setup.Recommend.test_hardware_here`. Der Test erwartet macOS oder Windows und schlägt unter Linux auch ohne diese Änderungen fehl.
 
@@ -24,6 +24,15 @@ Bestehende Tests: 319 gelaufen, 1 Fehler in `test_setup.Recommend.test_hardware_
 pip install osmium                      # nur für PLZ, Gemeinden, Kreise
 python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData
 ```
+
+Mehrere Gebiete in einer Karte, auch außerhalb Deutschlands:
+
+```
+python3 tools/build_region.py tools/regions/hessen.json tools/regions/bayern.json --label "Hessen und Bayern" --work ... --data ...
+python3 tools/build_region.py tools/regions/hessen.json --geofabrik europe/france/alsace:Elsass --work ... --data ...
+```
+
+**Ganz Europa in Straßendetail ist nicht sinnvoll.** Jede Region bringt ihr ganzes Straßennetz mit; die US-Gesamtkarte des Originals liegt bei rund 80 GB, Europa läge in derselben Größenordnung oder darüber (nicht gemessen). Geofabrik bietet das benötigte GeoPackage außerdem nur für kleinere Gebiete an, ein großes Land muss aus seinen Teilen gebaut werden. Sinnvoll: Heimatregion plus Nachbarn in Detail. Für eine europaweite Übersicht (Fernstraßen, Städte) fehlt noch ein eigener Builder, siehe Etappe 2.
 
 Lastbook muss dabei geschlossen sein. Ersetzte Dateien landen in `~/lastbook-work/replaced-<Zeit>/`.
 
@@ -49,7 +58,7 @@ Auf dem iPhone einmal `http://<IP des Servers>:8890/?key=<Schlüssel>` öffnen. 
 - Die Ortssuche wird ersetzt, US-Ortsnamen sind danach nicht mehr enthalten.
 - Texte im Kartenpanel nennen weiter die US-Basiskarte („Main roads ... for the whole US").
 - Die Quellenzeile der Karte nennt weiter US-Behörden; OpenStreetMap steht bereits darin.
-- `THIRD_PARTY_NOTICES.md` ist noch nicht ergänzt.
+- Eine Straße, die eine Regionsgrenze kreuzt, liegt in beiden Auszügen und wird doppelt gespeichert. Das Bild ändert sich nicht.
 
 ## Ziel
 
@@ -111,6 +120,7 @@ Verworfen: (a) die US-Builder direkt umschreiben – erschwert Updates vom Origi
 - Gebäude aus OSM.
 - Gewässer aus OSM.
 - Adresssuche aus OSM-Adressen.
+- Europaweite Übersichtskarte (Fernstraßen, Städte, große Gewässer) für die weiten Zoomstufen.
 
 ## Datenquellen (vor Nutzung prüfen: URL, Lizenz, Aktualität)
 

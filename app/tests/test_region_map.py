@@ -34,6 +34,29 @@ def line(*pts):
     return gp(struct.pack('<BII', 1, 2, len(pts)) + b''.join(struct.pack('<dd', *p) for p in pts))
 
 
+def make_second_gpkg(path):
+    """A neighbouring region: one road and one town near Aschaffenburg (Bayern)."""
+    db = sqlite3.connect(path)
+    for table, cols in TABLES.items():
+        db.execute(f'CREATE TABLE {table}(geom BLOB,{cols})')
+    db.execute("INSERT INTO gis_osm_roads_free VALUES (?,?,?,?)", (line((9.10, 49.97), (9.16, 49.98)), 'primary', 'Würzburger Straße', None))
+    db.execute("INSERT INTO gis_osm_places_free VALUES (?,?,?,?)", (point(9.15, 49.975), 'town', 70000, 'Aschaffenburg'))
+    db.execute("INSERT INTO gis_osm_pois_free VALUES (?,?,?)", (point(9.14, 49.97), 'pharmacy', 'Stadt-Apotheke'))
+    db.commit()
+    db.close()
+
+
+SECOND_OSM = '''<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+ <node id="1" version="1" lat="49.95" lon="9.10"/><node id="2" version="1" lat="49.95" lon="9.20"/>
+ <node id="3" version="1" lat="50.00" lon="9.20"/><node id="4" version="1" lat="50.00" lon="9.10"/>
+ <way id="10" version="1"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/></way>
+ <relation id="100" version="1"><member type="way" ref="10" role="outer"/>
+  <tag k="type" v="boundary"/><tag k="boundary" v="postal_code"/><tag k="postal_code" v="63739"/><tag k="note" v="63739 Aschaffenburg"/></relation>
+</osm>
+'''
+
+
 def make_gpkg(path):
     db = sqlite3.connect(path)
     for table, cols in TABLES.items():
@@ -137,6 +160,78 @@ class RegionMap(unittest.TestCase):
         self.assertEqual([(n, k) for n, k, *_ in self.find(db, 'Landkreis')], [('Landkreis Gießen', 'district')])
         self.assertEqual([n for n, *_ in self.find(db, 'Giessen') if n.startswith('Landkreis')], ['Landkreis Gießen'])
         self.assertEqual(db.execute("SELECT COUNT(*) FROM place WHERE name='Hessen'").fetchone()[0], 0)   # admin_level 4 is not asked for
+
+    def test_a_second_region_is_added_to_the_map(self):
+        out = self.dir / 'two.sqlite'
+        make_second_gpkg(self.dir / 'second.gpkg')
+        self.assertEqual(run(ROOT / 'tools/build_map.py', self.dir / 'region.gpkg', out, '--source', 'first', '--as-of', '2026-11-02').returncode, 0)
+        r = run(ROOT / 'tools/build_map.py', self.dir / 'second.gpkg', out, '--source', 'second', '--as-of', '2026-10-30', '--append')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        db = sqlite3.connect(out)
+        self.assertEqual([n for (n,) in db.execute("SELECT name FROM feat WHERE layer='road' ORDER BY id")], ['Kaiserstraße', 'A 5', 'Würzburger Straße'])
+        self.assertEqual(db.execute('SELECT COUNT(*),COUNT(DISTINCT id) FROM feat_idx').fetchone(), (6, 6))    # 2 roads and 2 places, then 1 and 1
+        self.assertEqual([n for (n,) in db.execute('SELECT name FROM poi ORDER BY id')], ['Universitätsklinikum', 'Stadt-Apotheke'])
+        meta = dict(db.execute('SELECT key,value FROM meta'))
+        self.assertEqual(meta['source'], 'first; second')
+        self.assertEqual(meta['data_as_of'], '2026-10-30')             # the older of the two
+        self.assertEqual(meta['bounds'], '8.68,49.97,9.16,50.62')      # both regions
+
+    @unittest.skipUnless(importlib.util.find_spec('osmium'), 'needs the osmium package')
+    def test_two_regions_from_download_to_data_folder(self):
+        """tools/build_region.py with two region files whose downloads are files here: nothing leaves this computer."""
+        import json
+        import zipfile
+        src, work, data = self.dir / 'src', self.dir / 'work', self.dir / 'LastbookData'
+        src.mkdir()
+        (data / 'library-data').mkdir(parents=True)
+        (data / 'library-data/catalog.json').write_text('[]')
+        (data / 'derived/geo').mkdir(parents=True)
+        (data / 'derived/geo/places.sqlite').write_text('the place finder that was there')
+        (data / 'derived/geo/terrain.sqlite').write_text('another map file, left alone')
+        files = []
+        for slug, code, label, gpkg, osm in (('hessen', 'HE', 'Hessen', make_gpkg, OSM_FILE), ('bayern', 'BY', 'Bayern', make_second_gpkg, SECOND_OSM)):
+            gpkg(src / f'{slug}.gpkg')
+            with zipfile.ZipFile(src / f'{slug}-latest-free.gpkg.zip', 'w') as z:
+                z.write(src / f'{slug}.gpkg', f'{slug}.gpkg')
+            (src / f'{slug}-latest.osm').write_text(osm, encoding='utf-8')
+            f = src / f'{slug}.json'
+            f.write_text(json.dumps({'code': code, 'label': label, 'gpkg_url': (src / f'{slug}-latest-free.gpkg.zip').as_uri(),
+                                     'pbf_url': (src / f'{slug}-latest.osm').as_uri(), 'source': f'test {slug}'}), encoding='utf-8')
+            files.append(f)
+        r = run(ROOT / 'tools/build_region.py', *files, '--work', work, '--data', data)
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        places = sqlite3.connect(data / 'derived/geo/places.sqlite')
+        self.assertEqual([(p[0], p[2]) for p in self.find(places, '35418')], [('35418', 'Buseck, Hessen')])
+        self.assertEqual([(p[0], p[2]) for p in self.find(places, '63739')], [('63739', 'Aschaffenburg, Bayern')])
+        self.assertEqual([p[2] for p in self.find(places, 'Aschaffenburg') if p[1] == 'town'], ['Hessen, Bayern (OpenStreetMap)'])
+        roads = sqlite3.connect(data / 'derived/geo/map.sqlite').execute("SELECT COUNT(*) FROM feat WHERE layer='road'").fetchone()[0]
+        self.assertEqual(roads, 3)
+        map_set = json.loads((data / 'map-set.json').read_text())
+        self.assertEqual(map_set['name'], 'HE+BY')
+        self.assertEqual(set(map_set['files']), {'derived/geo/map.sqlite', 'derived/geo/places.sqlite', 'derived/geo/terrain.sqlite'})
+        kept = list(work.glob('replaced-*/places.sqlite'))
+        self.assertEqual([k.read_text() for k in kept], ['the place finder that was there'])
+        self.assertEqual((data / 'derived/geo/terrain.sqlite').read_text(), 'another map file, left alone')
+
+    def test_a_geofabrik_path_names_its_downloads(self):
+        sys.path.insert(0, str(ROOT / 'tools'))
+        import build_region
+        r = build_region.geofabrik('europe/france/alsace:Elsass')
+        self.assertEqual((r['code'], r['label']), ('alsace', 'Elsass'))
+        self.assertEqual(r['gpkg_url'], 'https://download.geofabrik.de/europe/france/alsace-latest-free.gpkg.zip')
+        self.assertEqual(r['pbf_url'], 'https://download.geofabrik.de/europe/france/alsace-latest.osm.pbf')
+        with self.assertRaises(SystemExit):
+            build_region.geofabrik('https://example.org/x')
+
+    def test_every_region_file_is_complete(self):
+        import json
+        files = sorted((ROOT / 'tools/regions').glob('*.json'))
+        self.assertEqual(len(files), 16)
+        for f in files:
+            d = json.loads(f.read_text(encoding='utf-8'))
+            self.assertTrue({'code', 'label', 'gpkg_url', 'pbf_url', 'source'} <= set(d), f.name)
+            self.assertIn(f.stem + '-latest', d['gpkg_url'])
+        self.assertEqual(len({json.loads(f.read_text(encoding='utf-8'))['code'] for f in files}), 16)
 
 
 if __name__ == '__main__':

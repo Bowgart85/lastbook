@@ -1,0 +1,8 @@
+{
+  "code": "HH",
+  "label": "Hamburg",
+  "gpkg_url": "https://download.geofabrik.de/europe/germany/hamburg-latest-free.gpkg.zip",
+  "pbf_url": "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf",
+  "source": "OpenStreetMap contributors, via Geofabrik hamburg-latest-free.gpkg.zip (ODbL 1.0)",
+  "admin_levels": "6,8"
+}

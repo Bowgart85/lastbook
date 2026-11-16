@@ -1635,7 +1635,8 @@ def pack_datasets(have):
         out.append({'label': f'Place names ({holds[0]})' if holds else 'Place names (USGS GNIS, Census 2025 ZIP codes and counties)',
                     'status': 'Used by "Find a town, ZIP or place"'})
     if TERRAINDB.exists():
-        out.append({'label': 'Elevation (USGS 3DEP)', 'status': 'Shaded relief. Contour lines only where this map has fine detail.' if have['detail'] else 'Shaded relief at broad zoom levels'})
+        named = [v.split(' (')[0] for v in _distinct(TERRAINDB, "SELECT value FROM meta WHERE key='source'") if v and 'USGS' not in v]
+        out.append({'label': f"Elevation ({named[0] if named else 'USGS 3DEP'})", 'status': 'Shaded relief. Contour lines only where this map has fine detail.' if have['detail'] else 'Shaded relief at broad zoom levels'})
     if BLDGDB.exists():
         out.append({'label': 'Building outlines (Microsoft Global ML Building Footprints, ODbL; OpenStreetMap)', 'status': f'For {area}, shown from street level zoom'})
     if CROPDB.exists():

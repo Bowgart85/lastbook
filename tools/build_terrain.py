@@ -2,7 +2,12 @@
 
   derived/buildenv/bin/python tools/build_terrain.py [--bbox W,S,E,N] [--workers N]
 
+  python tools/build_terrain.py --src ~/work/dem --out ~/work/out/terrain.sqlite --source-name "Copernicus DEM GLO-30" --workers 2
+
 Source: USGS 3DEP 1 arc-second (~30 m) GeoTIFFs in library-data/geography/usgs/Elevation/1/TIFF/current.
+Outside the US, --src names a folder of Copernicus DEM GLO-30 GeoTIFFs instead (tools/fetch_copernicus_dem.py
+fetches them): one file per 1° cell, named by its south-west corner, found anywhere under the folder.
+Each worker holds up to ten source cells and one 4096 px grid in memory, about 1 GB: keep --workers small on a home computer.
 Tiles are 256 px web-mercator PNGs, zoom 5-12, in the "terrain-RGB" encoding
 (height_m = -10000 + (R*65536 + G*256 + B) * 0.1). Open ocean (no source data) has no tile.
 """
@@ -36,6 +41,13 @@ def cells():
         tif = next(d.glob('*.tif'), None)
         if tif:
             out[(top, left)] = tif
+    # Copernicus DEM: ..._N50_00_E008_00_DEM.tif is the cell whose south-west corner is 50°N 8°E, so its top is 51
+    for tif in SRC.rglob('*_DEM.tif'):
+        m = re.fullmatch(r'.*_([NS])(\d{2})_00_([EW])(\d{3})_00_DEM\.tif', tif.name)
+        if m:
+            south = int(m[2]) * (1 if m[1] == 'N' else -1)
+            left = int(m[4]) * (1 if m[3] == 'E' else -1)
+            out.setdefault((south + 1, left), tif)
     return out
 
 
@@ -121,8 +133,10 @@ def supertile(args):
     return out, H
 
 
-def init():
-    global CELLS
+def init(src=None):
+    global CELLS, SRC
+    if src:
+        SRC = Path(src)
     CELLS = cells()
 
 
@@ -130,8 +144,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--bbox', help='W,S,E,N limit (default: everything)')
     ap.add_argument('--workers', type=int, default=24)
+    ap.add_argument('--src', help='folder of source GeoTIFFs (default: the USGS folder in the library)')
+    ap.add_argument('--out', help='terrain.sqlite to write or continue (default: derived/geo/terrain.sqlite)')
+    ap.add_argument('--source-name', default='USGS 3DEP 1 arc-second DEM (library-data/geography/usgs/Elevation/1)',
+                    help='written into the file as its source')
     a = ap.parse_args()
-    init()
+    src = Path(a.src).expanduser().resolve() if a.src else None
+    init(src)
+    if not CELLS:
+        sys.exit(f'no elevation GeoTIFFs found in {SRC}')
     keys = set()
     for top, left in CELLS:
         if a.bbox:
@@ -146,7 +167,7 @@ def main():
             for y in range(ys[0], ys[1] + 1):
                 keys.add((x, y))
     keys = sorted(keys, key=lambda k: (k[1] // 2, k[0], k[1]))  # neighbours together so source cells stay cached
-    db = sqlite3.connect(OUT)
+    db = sqlite3.connect(Path(a.out).expanduser() if a.out else OUT)
     db.executescript('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS tile(z INT, x INT, y INT, png BLOB, PRIMARY KEY(z,x,y)) WITHOUT ROWID;'
                      'CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);'
                      'CREATE TABLE IF NOT EXISTS done(x INT, y INT, h8 BLOB, PRIMARY KEY(x,y)) WITHOUT ROWID;')
@@ -155,7 +176,7 @@ def main():
     todo = [k for k in keys if k not in finished]
     print(f'{len(finished)} supertiles already built, {len(todo)} to go', flush=True)
     t0, done, ntiles = time.time(), 0, 0
-    with ProcessPoolExecutor(a.workers, initializer=init) as pool:
+    with ProcessPoolExecutor(a.workers, initializer=init, initargs=(src,)) as pool:
         futs = [pool.submit(_job, k) for k in todo]
         for f in as_completed(futs):
             tiles, h8, key = f.result()  # a dead worker raises here instead of hanging
@@ -184,7 +205,7 @@ def main():
             db.execute('INSERT OR REPLACE INTO tile VALUES (?,?,?,?)', (z, x, y, png(h)))
         level = nxt
     db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', ('built', time.strftime('%Y-%m-%dT%H:%M:%S')))
-    db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', ('source', 'USGS 3DEP 1 arc-second DEM (library-data/geography/usgs/Elevation/1)'))
+    db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', ('source', a.source_name))
     db.commit()
     print(f'done: {done} supertiles, {ntiles:,} tiles in {time.time() - t0:.0f}s', flush=True)
 

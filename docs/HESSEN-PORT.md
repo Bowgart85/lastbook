@@ -14,15 +14,34 @@ Etappe 1 ist als Code vorhanden und mit kleinen Testdaten geprüft. **Mit echten
 | Metrische Anzeige außerhalb der USA (Maßstab, Höhen, Höhenlinien, 3D) | `web/map.js`, `web/terrain3d.js` | nur Syntaxprüfung, **nicht im Browser** |
 | Kartenpanel nennt die Ortsdaten der Region | `server.py` (`pack_datasets`) | `/api/map/info` |
 | Heimserver | `packaging/docker/Dockerfile`, `compose.yaml`, `.dockerignore` | Server lief mit genau diesen Dateien und Abhängigkeiten; **Image nicht gebaut** |
-| Tests | `app/tests/test_region_map.py` (9 Tests) | grün |
+| Gelände: Relief, Höhenlinien, Höhenangaben, 3D aus Copernicus DEM GLO-30 | `tools/fetch_copernicus_dem.py`, `tools/build_terrain.py` (`--src`, `--out`), `build_region.py --terrain` | Test mit künstlicher Höhenkachel, Höhe auf 0,5 m genau; Server liefert Kacheln; **echte Kacheln nicht** |
+| Tests | `app/tests/test_region_map.py` (10 Tests) | grün |
 
 Bestehende Tests: 319 gelaufen, 1 Fehler in `test_setup.Recommend.test_hardware_here`. Der Test erwartet macOS oder Windows und schlägt unter Linux auch ohne diese Änderungen fehl.
+
+### Fahrplan für die Sitzung am PC (ca. 1,5 Stunden)
+
+Vorher, ohne Claude Code (läuft nebenher, kostet nur Wartezeit):
+
+1. Lastbook-Pack laden: über die Lastbook-App (lastbook.org) das Small-Pack einrichten, oder ein Pack-Zip entpacken. Ergebnis: ein Ordner `LastbookData` mit `library-data/catalog.json`.
+2. Fork holen: `git clone https://github.com/Bowgart85/lastbook && cd lastbook && git checkout hessen-port`
+
+Mit Claude Code, in dieser Reihenfolge. Jeder Schritt ist für sich nützlich; wenn die Zeit knapp wird, nach Schritt 4 aufhören.
+
+3. `pip install osmium numpy tifffile imagecodecs` (am besten in einem venv), dann `python3 -B -m unittest app.tests.test_region_map`
+4. Kleiner Probelauf zuerst, um Download-Adressen und Laufzeit zu sehen, ohne `--terrain`:
+   `python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --no-boundaries`
+   Schlägt der Download fehl: Adressen auf download.geofabrik.de nachsehen und in `tools/regions/hessen.json` korrigieren.
+5. Voller Lauf mit Einspielen: `python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain`
+6. Server starten (Abschnitt Heimserver), Karte am PC-Browser und am iPhone prüfen: Abnahmeliste am Ende dieses Dokuments.
+7. Was auffällt, hier unter „Bekannte Lücken" notieren.
 
 ### So wird die Karte gebaut
 
 ```
 pip install osmium                      # nur für PLZ, Gemeinden, Kreise
-python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData
+pip install numpy tifffile imagecodecs  # nur für --terrain
+python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain
 ```
 
 Mehrere Gebiete in einer Karte, auch außerhalb Deutschlands:
@@ -46,6 +65,8 @@ docker compose -f packaging/docker/compose.yaml logs lastbook     # zeigt den Zu
 Auf dem iPhone einmal `http://<IP des Servers>:8890/?key=<Schlüssel>` öffnen. Der Server hat dafür bereits einen eigenen Modus (`--lan`): andere Geräte brauchen den Schlüssel einmal, danach gilt ein Cookie. Anfragen an einen Hostnamen statt an eine IP-Adresse lehnt er ab.
 
 ### Als Nächstes zu prüfen (mit echten Daten)
+
+0. Öffnen sich die echten Copernicus-Kacheln mit `tifffile`? Sie sind komprimiert; dafür kann `imagecodecs` nötig sein. Stimmt die Lage auf einen halben Bildpunkt (Gipfel und Täler passen zur Straßenkarte)? Am Rand der Region endet das Relief abrupt.
 
 1. Stimmen die beiden Geofabrik-Adressen in `tools/regions/hessen.json`? Sie sind nicht verifiziert.
 2. Laufzeit und Speicher von `build_region.py` für ganz Hessen. Der PLZ-Schritt baut alle Flächen des Auszugs zusammen und kann lange dauern; falls zu langsam, vorher mit `osmium tags-filter` auf `boundary=*` eingrenzen.
@@ -116,7 +137,8 @@ Verworfen: (a) die US-Builder direkt umschreiben – erschwert Updates vom Origi
 
 ### Etappe 2 – Ausbau
 
-- Gelände, Höhenlinien, 3D aus einem freien Höhenmodell.
+- ~~Gelände, Höhenlinien, 3D aus einem freien Höhenmodell.~~ Als Code erledigt, siehe Stand.
+- Gebäudeumrisse und Gewässerflächen kommen bereits mit der Straßenkarte aus Etappe 1. Offen sind nur Gebäudehöhen für die 3D-Ansicht.
 - Gebäude aus OSM.
 - Gewässer aus OSM.
 - Adresssuche aus OSM-Adressen.

@@ -213,6 +213,44 @@ class RegionMap(unittest.TestCase):
         self.assertEqual([k.read_text() for k in kept], ['the place finder that was there'])
         self.assertEqual((data / 'derived/geo/terrain.sqlite').read_text(), 'another map file, left alone')
 
+    @unittest.skipUnless(importlib.util.find_spec('tifffile') and importlib.util.find_spec('numpy'), 'needs tifffile and numpy')
+    def test_terrain_from_a_copernicus_cell(self):
+        """One made-up 1° cell (south-west corner 50°N 8°E) whose height is a plane: fetched from a folder, built, read back."""
+        import math
+        import zlib
+        import numpy as np
+        import tifffile
+        bucket, dem, out = self.dir / 'bucket', self.dir / 'dem', self.dir / 'terrain.sqlite'
+        name = 'Copernicus_DSM_COG_10_N50_00_E008_00_DEM'
+        (bucket / name).mkdir(parents=True)
+        rows, cols = 3600, 2400                                   # 1 arc-second by 1.5: the real grid at this latitude
+        lat = 51 - (np.arange(rows) + 0.5) / rows
+        lon = 8 + (np.arange(cols) + 0.5) / cols
+        height = (200 + 300 * (lat[:, None] - 50) + 100 * (lon[None, :] - 8)).astype(np.float32)
+        tifffile.imwrite(bucket / name / f'{name}.tif', height, extratags=[
+            (33550, 'd', 3, (1 / cols, 1 / rows, 0.0), False), (33922, 'd', 6, (0.0, 0.0, 0.0, 8.0, 51.0, 0.0), False)])
+        r = run(ROOT / 'tools/fetch_copernicus_dem.py', '--bbox', '8.7,50.5,9.4,50.7', '--out', dem, '--base', bucket.as_uri() + '/')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('1 cells', r.stdout)                         # 8-9°E is there; 9-10°E is "sea"
+        r = run(ROOT / 'tools/build_terrain.py', '--src', dem, '--out', out, '--workers', '1', '--source-name', 'Copernicus DEM GLO-30')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        db = sqlite3.connect(out)
+        self.assertEqual(dict(db.execute('SELECT key,value FROM meta'))['source'], 'Copernicus DEM GLO-30')
+        self.assertEqual([z for (z,) in db.execute('SELECT DISTINCT z FROM tile ORDER BY z')], list(range(4, 13)))
+        want_lat, want_lon, z = 50.6, 8.7833, 12                   # Großen-Buseck
+        n = 2 ** z
+        fx = (want_lon + 180) / 360 * n
+        fy = (1 - math.asinh(math.tan(math.radians(want_lat))) / math.pi) / 2 * n
+        png = db.execute('SELECT png FROM tile WHERE z=? AND x=? AND y=?', (z, int(fx), int(fy))).fetchone()[0]
+        i = png.index(b'IDAT')
+        size = int.from_bytes(png[i - 4:i], 'big')
+        raw = np.frombuffer(zlib.decompress(png[i + 4:i + 4 + size]), np.uint8).reshape(256, 1 + 256 * 3)
+        self.assertTrue((raw[:, 0] == 2).all())                    # every row filtered "Up"
+        rgb = np.cumsum(raw[:, 1:].astype(np.uint32), axis=0).astype(np.uint8).reshape(256, 256, 3).astype(np.uint32)
+        px = rgb[int((fy % 1) * 256), int((fx % 1) * 256)]
+        metres = -10000 + (int(px[0]) * 65536 + int(px[1]) * 256 + int(px[2])) * 0.1
+        self.assertAlmostEqual(metres, 200 + 300 * 0.6 + 100 * 0.7833, delta=0.5)
+
     def test_a_geofabrik_path_names_its_downloads(self):
         sys.path.insert(0, str(ROOT / 'tools'))
         import build_region

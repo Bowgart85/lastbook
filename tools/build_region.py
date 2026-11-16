@@ -16,11 +16,15 @@ tools/regions/).
   1 download   both files of each region into the work folder, unless they are already there
   2 streets    tools/build_map.py         -> <work>/out/map.sqlite     roads, land, water, buildings, help points
   3 places     tools/build_places_osm.py  -> <work>/out/places.sqlite  places, postal codes, municipalities, districts
-  4 install    with --data: the two files go to <data>/derived/geo/, what they replace moves to <work>/replaced-<time>/,
+  4 terrain    with --terrain: tools/fetch_copernicus_dem.py and tools/build_terrain.py -> <work>/out/terrain.sqlite
+               relief, contour lines, spot heights and the 3D view for the box the streets fall in, from
+               Copernicus DEM GLO-30 (needs numpy and tifffile; imagecodecs too if a file will not open). With
+               --data, the data folder's own terrain.sqlite is the starting point, so what it already shows stays.
+  5 install    with --data: the built files go to <data>/derived/geo/, what they replace moves to <work>/replaced-<time>/,
                the map's cached answers are cleared, and map-set.json is written so the app's own check of the
                library accepts the new map (engine/setup/install.py check_map).
 
-The app must be closed while step 4 runs. Terrain, building heights and street addresses are not built here.
+The app must be closed while step 5 runs. Building heights and street addresses are not built here.
 The place finder is replaced, so US place names are no longer in it. Size: every region adds its whole street
 network. A German state is a few hundred MB to a few GB as a built map; all of Europe at this detail is far
 more than a phone-sized pack and has not been tried.
@@ -88,21 +92,40 @@ def run(*args):
         sys.exit(f'{Path(args[0]).name} failed ({r.returncode})')
 
 
-def install(out, data, work, code):
+def terrain(out, data, work, workers, dem_base=None):
+    """Elevation for the box of the street map just built, added to a copy of the data folder's terrain if it has one."""
+    import sqlite3
+    box = sqlite3.connect(out / 'map.sqlite').execute("SELECT value FROM meta WHERE key='bounds'").fetchone()
+    if not box or not box[0]:
+        sys.exit('the street map has no bounds, so there is no box to fetch elevation for')
+    target = out / 'terrain.sqlite'
+    have = data / 'derived' / 'geo' / 'terrain.sqlite' if data else None
+    if not target.exists() and have and have.is_file():
+        shutil.copy2(have, target)      # the pack's broad relief stays; this region's tiles are added to it
+    run(TOOLS / 'fetch_copernicus_dem.py', '--bbox', box[0], '--out', work / 'dem', *(['--base', dem_base] if dem_base else []))
+    run(TOOLS / 'build_terrain.py', '--src', work / 'dem', '--out', target, '--workers', workers, '--bbox', box[0],
+        '--source-name', 'Copernicus DEM GLO-30 (© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA)')
+    db = sqlite3.connect(target)
+    db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    db.execute('PRAGMA journal_mode=DELETE')    # one file to copy, no -wal beside it
+    db.close()
+
+
+def install(out, data, work, code, built=('map.sqlite', 'places.sqlite')):
     from engine.setup import install as setup_install
     geo = data / 'derived' / 'geo'
     if not (data / 'library-data' / 'catalog.json').is_file():
         sys.exit(f'{data} is not a Lastbook data folder (no library-data/catalog.json)')
     geo.mkdir(parents=True, exist_ok=True)
     kept = work / time.strftime('replaced-%Y%m%d-%H%M%S')
-    stale = [geo / n for n in ('map.sqlite', 'places.sqlite', 'socal-cells.json', 'tilecache')]
-    stale += [geo / (n + side) for n in ('map.sqlite', 'places.sqlite') for side in setup_install.SQLITE_SIDES]
+    stale = [geo / n for n in (*built, 'socal-cells.json', 'tilecache')]
+    stale += [geo / (n + side) for n in built for side in setup_install.SQLITE_SIDES]
     stale.append(data / 'map-set.json')
     for p in stale:
         if p.exists():
             kept.mkdir(parents=True, exist_ok=True)
             shutil.move(str(p), str(kept / p.name))
-    for name in ('map.sqlite', 'places.sqlite'):
+    for name in built:
         shutil.copy2(out / name, geo / name)
     files = {rel: (data / rel).stat().st_size for rel in setup_install.map_files(data) if rel != 'map-set.json'}
     (data / 'map-set.json').write_text(json.dumps({'name': code, 'files': files}, indent=1), encoding='utf-8')
@@ -120,6 +143,9 @@ def main():
     ap.add_argument('--label', help='what the whole map is called when it has several regions (default: their labels, joined)')
     ap.add_argument('--gpkg', help='one region only: a Geofabrik "free" .gpkg or .gpkg.zip already on this computer')
     ap.add_argument('--pbf', help='one region only: its .osm.pbf (or .osm) already on this computer')
+    ap.add_argument('--terrain', action='store_true', help='also build relief and contour lines from Copernicus DEM GLO-30')
+    ap.add_argument('--dem-base', help='another place to fetch the elevation cells from (see tools/fetch_copernicus_dem.py --base)')
+    ap.add_argument('--workers', type=int, default=2, help='processes for --terrain, about 1 GB of memory each (default 2)')
     ap.add_argument('--no-boundaries', action='store_true', help='skip postal codes, municipalities and districts (no .osm.pbf, no osmium needed)')
     a = ap.parse_args()
     regions = [json.loads(Path(r).read_text(encoding='utf-8')) for r in a.regions] + [geofabrik(g) for g in a.geofabrik]
@@ -156,10 +182,15 @@ def main():
         if pbf:
             places += ['--pbf', f"{pbf}={r['label']}"]
     run(*places)
-    for name in ('map.sqlite', 'places.sqlite'):
+    data = Path(a.data).expanduser().resolve() if a.data else None
+    built = ['map.sqlite', 'places.sqlite']
+    if a.terrain:
+        terrain(out, data, work, a.workers, a.dem_base)
+        built.append('terrain.sqlite')
+    for name in built:
         print(name, f'{(out / name).stat().st_size / 1e6:.1f} MB', flush=True)
-    if a.data:
-        install(out, Path(a.data).expanduser().resolve(), work, code)
+    if data:
+        install(out, data, work, code, built)
 
 
 if __name__ == '__main__':

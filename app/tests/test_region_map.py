@@ -251,6 +251,55 @@ class RegionMap(unittest.TestCase):
         metres = -10000 + (int(px[0]) * 65536 + int(px[1]) * 256 + int(px[2])) * 0.1
         self.assertAlmostEqual(metres, 200 + 300 * 0.6 + 100 * 0.7833, delta=0.5)
 
+    @unittest.skipUnless(importlib.util.find_spec('osmium'), 'needs the osmium package')
+    def test_addresses_the_way_they_are_written_here(self):
+        sys.path.insert(0, str(ROOT))
+        from engine.address_search import find_addresses, fold, street_first
+        self.assertEqual({fold(t) for t in ('Kaiserstraße', 'Kaiserstrasse', 'Kaiserstr.', 'KAISERSTR')}, {'kaiserstr'})
+        self.assertEqual(fold('Straße der Républik'), 'str der republik')
+        osm = self.dir / 'addr.osm'
+        osm.write_text('''<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+ <node id="1" version="1" lat="50.6000" lon="8.7800"><tag k="addr:housenumber" v="12a"/><tag k="addr:street" v="Kaiserstraße"/>
+  <tag k="addr:city" v="Buseck"/><tag k="addr:postcode" v="35418"/></node>
+ <node id="2" version="1" lat="50.5800" lon="8.6700"><tag k="addr:housenumber" v="12a"/><tag k="addr:street" v="Kaiserstraße"/>
+  <tag k="addr:city" v="Gießen"/><tag k="addr:postcode" v="35390"/></node>
+ <node id="3" version="1" lat="50.6100" lon="8.7900"><tag k="addr:housenumber" v="3;5"/><tag k="addr:street" v="Am Mühlberg"/></node>
+ <node id="4" version="1" lat="50.6200" lon="8.7900"><tag k="addr:housenumber" v="7"/></node>
+ <node id="11" version="1" lat="50.6010" lon="8.7810"/><node id="12" version="1" lat="50.6010" lon="8.7830"/>
+ <node id="13" version="1" lat="50.6030" lon="8.7830"/><node id="14" version="1" lat="50.6030" lon="8.7810"/>
+ <way id="20" version="1"><nd ref="11"/><nd ref="12"/><nd ref="13"/><nd ref="14"/><nd ref="11"/>
+  <tag k="building" v="yes"/><tag k="addr:housenumber" v="1"/><tag k="addr:street" v="Schloßgasse"/><tag k="addr:city" v="Buseck"/></way>
+</osm>
+''', encoding='utf-8')
+        geo = self.dir / 'geo-addr'
+        r = run(ROOT / 'tools/build_addresses_osm.py', osm, geo / 'addresses/HE.sqlite', '--code', 'HE')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('5 addresses', r.stdout)                     # 2 + the two of "3;5" + the building; the node with no street is left out
+
+        def found(q):
+            return [(h['name'], h['detail']) for h in find_addresses(q, geo)]
+        both = [('Kaiserstraße 12a', '35390 Gießen'), ('Kaiserstraße 12a', '35418 Buseck')]
+        self.assertEqual(sorted(found('12a Kaiserstraße')), both)
+        self.assertEqual(sorted(found('12A Kaiserstrasse')), both)
+        self.assertEqual(sorted(found('12a Kaiserstr.')), both)
+        self.assertEqual(found('12a Kaiserstraße Buseck'), [both[1]])
+        self.assertEqual(found('12a Kaiserstr Giessen'), [both[0]])        # ß typed as ss, in the town too
+        self.assertEqual(found('12a Kaiserstraße 35418'), [both[1]])
+        self.assertEqual(found('13 Kaiserstraße'), [])                     # never a neighbouring house
+        self.assertEqual(found('5 Am Muehlberg'), [('Am Mühlberg 5', '')])
+        hit = find_addresses('1 Schlossgasse', geo)[0]
+        self.assertEqual((hit['name'], hit['source']), ('Schloßgasse 1', 'OpenStreetMap'))
+        self.assertAlmostEqual(hit['lat'], 50.602, places=4)               # the middle of the outline
+        self.assertAlmostEqual(hit['lon'], 8.782, places=4)
+        # the street-first way of writing it
+        self.assertEqual(street_first('Kaiserstraße 12a, 35418 Buseck', geo), '12a Kaiserstraße Buseck 35418')
+        self.assertEqual(street_first('Am Mühlberg 5', geo), '5 Am Mühlberg')
+        self.assertEqual(found(street_first('Kaiserstr. 12 a Buseck', geo)), [both[1]])
+        self.assertIsNone(street_first('35418', geo))
+        self.assertIsNone(street_first('Buseck', geo))
+        self.assertIsNone(street_first('Highway 101', self.dir))           # no street-first index there: stays a place search
+
     def test_a_geofabrik_path_names_its_downloads(self):
         sys.path.insert(0, str(ROOT / 'tools'))
         import build_region

@@ -2,6 +2,7 @@
 import math
 import re
 import sqlite3
+import unicodedata
 from pathlib import Path
 
 from engine.paths import ro_uri
@@ -38,6 +39,45 @@ def normalize(text):
     return ' '.join(WORDS.get(word, word) for word in re.sub(r'[^a-z0-9 ]+', ' ', text.lower()).split())
 
 
+# Indexes built from OpenStreetMap for regions outside the US (tools/build_addresses_osm.py) say layout = "street number"
+# in their meta table. Their street names are folded with fold(), not normalize(): the two must stay in step with that tool.
+_FOLD = str.maketrans({'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss'})
+
+
+def fold(text):
+    """'Kaiserstraße', 'Kaiserstrasse' and 'Kaiserstr.' all become 'kaiserstr'; accents go, é becomes e."""
+    text = unicodedata.normalize('NFKD', text.lower().translate(_FOLD))
+    text = ''.join(c for c in text if not unicodedata.combining(c))
+    text = re.sub(r'strasse\b', 'str', text)
+    return ' '.join(re.sub(r'[^a-z0-9 ]+', ' ', text).split())
+
+
+def street_first(query, geo_directory):
+    """'Kaiserstraße 12a, 35418 Buseck' as '12a Kaiserstraße Buseck 35418', the order the search reads.
+
+    None unless an installed index is laid out street-first, so that 'Highway 101' stays a place search
+    where every index is a US one."""
+    m = re.fullmatch(r'\s*(?P<street>[^\W\d][^,\d]*?)[\s,]+(?P<num>\d+\s?[A-Za-z]?)(?:[\s,]+(?P<rest>.*))?', query)
+    if not m or not any(_layout(p) == 'street number' for p in sorted((Path(geo_directory) / 'addresses').glob('*.sqlite'))):
+        return None
+    rest = re.sub(r'[,;]+', ' ', m['rest'] or '').split()
+    codes = [w for w in rest if re.fullmatch(r'\d{5}', w)]
+    words = [w for w in rest if w not in codes]
+    return ' '.join([m['num'].replace(' ', ''), m['street'].strip(), *words, *codes[:1]])
+
+
+def _layout(path):
+    try:
+        connection = sqlite3.connect(ro_uri(path), uri=True)
+        try:
+            row = connection.execute("SELECT value FROM meta WHERE key='layout'").fetchone()
+        finally:
+            connection.close()
+        return row[0] if row else ''
+    except sqlite3.Error:
+        return ''
+
+
 def is_address_query(query):
     """A standalone ZIP remains a place query. A number followed by words is an address."""
     return bool(re.match(r'^\s*\d[\w-]*\s+\S', query))
@@ -53,10 +93,10 @@ def street_forms(street):
     return list(dict.fromkeys(forms))
 
 
-def _parts(query):
+def _parts(query, folded=False):
     number, remainder = query.strip().split(None, 1)
     number = number.upper()
-    remainder = re.sub(r'[^a-z0-9 ]+', ' ', remainder.lower()).split()
+    remainder = (fold(remainder) if folded else re.sub(r'[^a-z0-9 ]+', ' ', remainder.lower())).split()
     postcode = ''
     if remainder and re.fullmatch(r'\d{5}', remainder[-1]):
         postcode = remainder.pop()
@@ -70,6 +110,8 @@ def _parts(query):
             state = code
             remainder = remainder[:-count]
             break
+    if folded:
+        return number, remainder, state, postcode
     return number, normalize(' '.join(remainder)).split(), state, postcode
 
 
@@ -89,12 +131,24 @@ def find_addresses(query, geo_directory, limit=8, near=None):
         paths = [legacy]
     connections = []
     try:
+        described = {}
         for path in paths:
             try:
-                connections.append(sqlite3.connect(ro_uri(path), uri=True))
+                connection = sqlite3.connect(ro_uri(path), uri=True)
+                connection.create_function('fold', 1, lambda value: fold(value or ''), deterministic=True)
+                connections.append(connection)
+                try:
+                    described[connection] = dict(connection.execute("SELECT key,value FROM meta WHERE key IN ('layout','credit')"))
+                except sqlite3.Error:
+                    described[connection] = {}
             except sqlite3.Error:
                 continue
-        for count in range(len(words), 0, -1):
+        # As typed first. Then folded, for indexes whose names were folded: 'Kaiserstraße' is otherwise read as 'kaiserstra e'.
+        attempts = [(words, False)]
+        folded_words = _parts(query, folded=True)[1]
+        if folded_words and (folded_words != words or any(d.get('layout') for d in described.values())):
+            attempts.append((folded_words, True))
+        for words, folded, count in ((w, f, c) for w, f in attempts for c in range(len(w), 0, -1)):
             street = ' '.join(words[:count])
             if all(word in set(WORDS.values()) for word in words[:count]):
                 continue
@@ -110,13 +164,13 @@ def find_addresses(query, geo_directory, limit=8, near=None):
                     conditions.append('zip = ?')
                     parameters.append(postcode)
                 if city:
-                    conditions.append('lower(city) LIKE ?')
+                    conditions.append('fold(city) LIKE ?' if folded else 'lower(city) LIKE ?')
                     parameters.append(city + '%')
                 sql = ('SELECT num,street,city,state,zip,lat,lon,norm FROM addr WHERE '
                        + ' AND '.join(conditions) + ' ORDER BY length(norm),norm LIMIT ?')
                 for connection in connections:
                     try:
-                        rows.extend(connection.execute(sql, [*parameters, limit * 3]).fetchall())
+                        rows.extend((*row, connection) for row in connection.execute(sql, [*parameters, limit * 3]))
                     except sqlite3.Error:
                         continue
             if rows:
@@ -126,15 +180,18 @@ def find_addresses(query, geo_directory, limit=8, near=None):
                         distance = (row[5] - near[0]) ** 2 + ((row[6] - near[1]) * math.cos(math.radians(near[0]))) ** 2
                     return len(row[7]), distance, row[3], row[2], row[1]
                 results, seen = [], set()
-                for num, name, city_name, state_code, zip_code, lat, lon, normalized in sorted(rows, key=rank):
+                for num, name, city_name, state_code, zip_code, lat, lon, normalized, connection in sorted(rows, key=rank):
+                    about = described.get(connection, {})
+                    number_last = about.get('layout') == 'street number'
                     key = (num, normalized, lat, lon)
                     if key in seen:
                         continue
                     seen.add(key)
                     results.append({
-                        'name': f'{num} {name}', 'kind': 'Street address',
-                        'detail': ', '.join(part for part in (city_name, state_code, zip_code) if part),
-                        'lat': lat, 'lon': lon, 'source': 'Overture Maps', 'onMap': True,
+                        'name': f'{name} {num}' if number_last else f'{num} {name}', 'kind': 'Street address',
+                        'detail': (' '.join(part for part in (zip_code, city_name) if part) if number_last
+                                   else ', '.join(part for part in (city_name, state_code, zip_code) if part)),
+                        'lat': lat, 'lon': lon, 'source': about.get('credit') or 'Overture Maps', 'onMap': True,
                     })
                     if len(results) == limit:
                         break

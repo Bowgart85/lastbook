@@ -15,7 +15,8 @@ Etappe 1 ist als Code vorhanden und mit kleinen Testdaten geprüft. **Mit echten
 | Kartenpanel nennt die Ortsdaten der Region | `server.py` (`pack_datasets`) | `/api/map/info` |
 | Heimserver | `packaging/docker/Dockerfile`, `compose.yaml`, `.dockerignore` | Server lief mit genau diesen Dateien und Abhängigkeiten; **Image nicht gebaut** |
 | Gelände: Relief, Höhenlinien, Höhenangaben, 3D aus Copernicus DEM GLO-30 | `tools/fetch_copernicus_dem.py`, `tools/build_terrain.py` (`--src`, `--out`), `build_region.py --terrain` | Test mit künstlicher Höhenkachel, Höhe auf 0,5 m genau; Server liefert Kacheln; **echte Kacheln nicht** |
-| Tests | `app/tests/test_region_map.py` (10 Tests) | grün |
+| Adresssuche: „Kaiserstraße 12, Buseck", auch als „Kaiserstr." oder „Kaiserstrasse" | `tools/build_addresses_osm.py`, `engine/address_search.py`, `server.py`, `build_region.py --addresses` | Tests + `/api/places`; die 8 bestehenden Adresstests (US) bleiben grün |
+| Tests | `app/tests/test_region_map.py` (11 Tests) | grün |
 
 Bestehende Tests: 319 gelaufen, 1 Fehler in `test_setup.Recommend.test_hardware_here`. Der Test erwartet macOS oder Windows und schlägt unter Linux auch ohne diese Änderungen fehl.
 
@@ -32,7 +33,7 @@ Mit Claude Code, in dieser Reihenfolge. Jeder Schritt ist für sich nützlich; w
 4. Kleiner Probelauf zuerst, um Download-Adressen und Laufzeit zu sehen, ohne `--terrain`:
    `python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --no-boundaries`
    Schlägt der Download fehl: Adressen auf download.geofabrik.de nachsehen und in `tools/regions/hessen.json` korrigieren.
-5. Voller Lauf mit Einspielen: `python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain`
+5. Voller Lauf mit Einspielen: `python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain --addresses`
 6. Server starten (Abschnitt Heimserver), Karte am PC-Browser und am iPhone prüfen: Abnahmeliste am Ende dieses Dokuments.
 7. Was auffällt, hier unter „Bekannte Lücken" notieren.
 
@@ -41,7 +42,7 @@ Mit Claude Code, in dieser Reihenfolge. Jeder Schritt ist für sich nützlich; w
 ```
 pip install osmium                      # nur für PLZ, Gemeinden, Kreise
 pip install numpy tifffile imagecodecs  # nur für --terrain
-python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain
+python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain --addresses
 ```
 
 Mehrere Gebiete in einer Karte, auch außerhalb Deutschlands:
@@ -79,6 +80,7 @@ Auf dem iPhone einmal `http://<IP des Servers>:8890/?key=<Schlüssel>` öffnen. 
 - Die Ortssuche wird ersetzt, US-Ortsnamen sind danach nicht mehr enthalten.
 - Texte im Kartenpanel nennen weiter die US-Basiskarte („Main roads ... for the whole US").
 - Die Quellenzeile der Karte nennt weiter US-Behörden; OpenStreetMap steht bereits darin.
+- Adressen ohne `addr:city` und `addr:postcode` in OSM werden über Straße und Hausnummer gefunden, aber nicht über den Ort. Wie viele das in Hessen betrifft, ist ungeprüft. Abhilfe wäre, Ort und PLZ aus den Grenzflächen zuzuordnen.
 - Eine Straße, die eine Regionsgrenze kreuzt, liegt in beiden Auszügen und wird doppelt gespeichert. Das Bild ändert sich nicht.
 
 ## Ziel
@@ -141,7 +143,7 @@ Verworfen: (a) die US-Builder direkt umschreiben – erschwert Updates vom Origi
 - Gebäudeumrisse und Gewässerflächen kommen bereits mit der Straßenkarte aus Etappe 1. Offen sind nur Gebäudehöhen für die 3D-Ansicht.
 - Gebäude aus OSM.
 - Gewässer aus OSM.
-- Adresssuche aus OSM-Adressen.
+- ~~Adresssuche aus OSM-Adressen.~~ Als Code erledigt, siehe Stand.
 - Europaweite Übersichtskarte (Fernstraßen, Städte, große Gewässer) für die weiten Zoomstufen.
 
 ## Datenquellen (vor Nutzung prüfen: URL, Lizenz, Aktualität)

@@ -20,11 +20,13 @@ tools/regions/).
                relief, contour lines, spot heights and the 3D view for the box the streets fall in, from
                Copernicus DEM GLO-30 (needs numpy and tifffile; imagecodecs too if a file will not open). With
                --data, the data folder's own terrain.sqlite is the starting point, so what it already shows stays.
-  5 install    with --data: the built files go to <data>/derived/geo/, what they replace moves to <work>/replaced-<time>/,
+  5 addresses  with --addresses: tools/build_addresses_osm.py -> <work>/out/addresses/<code>.sqlite, one per region
+               house addresses from the raw extract, found as "Kaiserstraße 12, Buseck"
+  6 install    with --data: the built files go to <data>/derived/geo/, what they replace moves to <work>/replaced-<time>/,
                the map's cached answers are cleared, and map-set.json is written so the app's own check of the
                library accepts the new map (engine/setup/install.py check_map).
 
-The app must be closed while step 5 runs. Building heights and street addresses are not built here.
+The app must be closed while step 6 runs. Building heights for the 3D view are not built here.
 The place finder is replaced, so US place names are no longer in it. Size: every region adds its whole street
 network. A German state is a few hundred MB to a few GB as a built map; all of Europe at this detail is far
 more than a phone-sized pack and has not been tried.
@@ -127,6 +129,9 @@ def install(out, data, work, code, built=('map.sqlite', 'places.sqlite')):
             shutil.move(str(p), str(kept / p.name))
     for name in built:
         shutil.copy2(out / name, geo / name)
+    for index in sorted((out / 'addresses').glob('*.sqlite')):      # beside the map, not part of the map set
+        (geo / 'addresses').mkdir(exist_ok=True)
+        shutil.copy2(index, geo / 'addresses' / index.name)
     files = {rel: (data / rel).stat().st_size for rel in setup_install.map_files(data) if rel != 'map-set.json'}
     (data / 'map-set.json').write_text(json.dumps({'name': code, 'files': files}, indent=1), encoding='utf-8')
     setup_install.check_map(data)
@@ -143,6 +148,7 @@ def main():
     ap.add_argument('--label', help='what the whole map is called when it has several regions (default: their labels, joined)')
     ap.add_argument('--gpkg', help='one region only: a Geofabrik "free" .gpkg or .gpkg.zip already on this computer')
     ap.add_argument('--pbf', help='one region only: its .osm.pbf (or .osm) already on this computer')
+    ap.add_argument('--addresses', action='store_true', help='also build the house address search from the .osm.pbf')
     ap.add_argument('--terrain', action='store_true', help='also build relief and contour lines from Copernicus DEM GLO-30')
     ap.add_argument('--dem-base', help='another place to fetch the elevation cells from (see tools/fetch_copernicus_dem.py --base)')
     ap.add_argument('--workers', type=int, default=2, help='processes for --terrain, about 1 GB of memory each (default 2)')
@@ -153,7 +159,7 @@ def main():
         ap.error('name at least one region file or --geofabrik region')
     if (a.gpkg or a.pbf) and len(regions) != 1:
         ap.error('--gpkg and --pbf are for a single region')
-    if not a.no_boundaries:
+    if not a.no_boundaries or a.addresses:
         try:
             import osmium  # noqa: F401
         except ImportError:
@@ -169,7 +175,7 @@ def main():
     for r in regions:
         gpkg = Path(a.gpkg).expanduser() if a.gpkg else fetch(r['gpkg_url'], work / r['gpkg_url'].rsplit('/', 1)[1])
         pbf = None
-        if not a.no_boundaries:
+        if not a.no_boundaries or a.addresses:
             pbf = Path(a.pbf).expanduser() if a.pbf else fetch(r['pbf_url'], work / r['pbf_url'].rsplit('/', 1)[1])
         got.append((r, gpkg, pbf))
 
@@ -179,9 +185,13 @@ def main():
         as_of = time.strftime('%Y-%m-%d', time.gmtime(gpkg.stat().st_mtime))
         print('streets:', r['label'], flush=True)
         run(TOOLS / 'build_map.py', gpkg_from(gpkg, work), out / 'map.sqlite', '--source', r['source'], '--as-of', as_of, *(['--append'] if i else []))
-        if pbf:
+        if pbf and not a.no_boundaries:
             places += ['--pbf', f"{pbf}={r['label']}"]
     run(*places)
+    if a.addresses:
+        for r, _, pbf in got:
+            print('addresses:', r['label'], flush=True)
+            run(TOOLS / 'build_addresses_osm.py', pbf, out / 'addresses' / f"{r['code']}.sqlite", '--code', r['code'])
     data = Path(a.data).expanduser().resolve() if a.data else None
     built = ['map.sqlite', 'places.sqlite']
     if a.terrain:

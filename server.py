@@ -1395,6 +1395,11 @@ def water_places(q, limit=10, near=None):
 def places(q, limit=20, near=None):
     if address_search.is_address_query(q):
         return address_search.find_addresses(q, HERE / 'derived' / 'geo', limit=min(limit, 8), near=near)
+    reordered = address_search.street_first(q, HERE / 'derived' / 'geo')    # "Kaiserstraße 12, Buseck", where such an index is installed
+    if reordered:
+        found = address_search.find_addresses(reordered, HERE / 'derived' / 'geo', limit=min(limit, 8), near=near)
+        if found:
+            return found        # otherwise it may be a place after all ("Route 66")
     if not PLACEDB.exists():
         return []
     db = sqlite3.connect(ro_uri(PLACEDB), uri=True)

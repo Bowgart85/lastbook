@@ -325,6 +325,39 @@ class RegionMap(unittest.TestCase):
         self.assertIsNone(street_first('Buseck', geo))
         self.assertIsNone(street_first('Highway 101', self.dir))           # no street-first index there: stays a place search
 
+    @unittest.skipUnless(importlib.util.find_spec('osmium'), 'needs the osmium package')
+    def test_overview_fills_in_around_the_region_only(self):
+        """Main roads and towns of a wider extract are added, except where the region map already has streets."""
+        import shutil
+        target = self.dir / 'with-overview.sqlite'
+        shutil.copy2(self.map, target)                              # Hessen test map: a residential street at 8.78-8.80, 50.60
+        osm = self.dir / 'wide.osm'
+        osm.write_text('''<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+ <node id="1" version="1" lat="50.60" lon="8.781"/><node id="2" version="1" lat="50.61" lon="8.790"/>
+ <node id="3" version="1" lat="50.10" lon="8.60"/><node id="4" version="1" lat="50.05" lon="8.62"/><node id="5" version="1" lat="50.00" lon="8.65"/>
+ <node id="6" version="1" lat="52.52" lon="13.40"><tag k="place" v="city"/><tag k="name" v="Berlin"/><tag k="population" v="3700000"/></node>
+ <node id="7" version="1" lat="49.87" lon="8.65"><tag k="place" v="city"/><tag k="name" v="Darmstadt"/><tag k="population" v="160000"/></node>
+ <node id="8" version="1" lat="50.605" lon="8.785"><tag k="place" v="town"/><tag k="name" v="Inside the detail"/></node>
+ <node id="9" version="1" lat="49.50" lon="8.50"><tag k="place" v="village"/><tag k="name" v="Too small"/></node>
+ <way id="10" version="1"><nd ref="1"/><nd ref="2"/><tag k="highway" v="primary"/><tag k="name" v="Already drawn in detail"/></way>
+ <way id="11" version="1"><nd ref="3"/><nd ref="4"/><nd ref="5"/><tag k="highway" v="motorway"/><tag k="ref" v="A 5"/><tag k="name" v="Bundesautobahn 5"/></way>
+ <way id="12" version="1"><nd ref="3"/><nd ref="5"/><tag k="highway" v="residential"/><tag k="name" v="Not a main road"/></way>
+</osm>
+''', encoding='utf-8')
+        before = sqlite3.connect(target).execute('SELECT COUNT(*) FROM feat').fetchone()[0]
+        for _ in range(2):                                          # the second run replaces the first, it does not double it
+            r = run(ROOT / 'tools/build_overview_osm.py', osm, target)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn('1 main roads, 2 cities and towns added; 2 left out', r.stdout)
+        db = sqlite3.connect(target)
+        added = db.execute('SELECT f.layer,f.cls,f.name,f.minz FROM feat f WHERE f.id > ? ORDER BY f.id', (before,)).fetchall()
+        self.assertEqual(added, [('place', 'city', 'Berlin', 5), ('place', 'city', 'Darmstadt', 6), ('road', 'motorway', 'A 5', 5)])
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM feat').fetchone()[0], before + 3)
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM feat_idx').fetchone()[0], before + 3)
+        box = db.execute("SELECT i.minx,i.maxx,i.miny,i.maxy FROM feat_idx i JOIN feat f ON f.id=i.id WHERE f.name='A 5' AND f.cls='motorway' AND i.miny < 50.2").fetchone()
+        self.assertEqual([round(v, 2) for v in box], [8.6, 8.65, 50.0, 50.1])
+
     def test_a_geofabrik_path_names_its_downloads(self):
         sys.path.insert(0, str(ROOT / 'tools'))
         import build_region

@@ -20,6 +20,8 @@ tools/regions/).
                relief, contour lines, spot heights and the 3D view for the box the streets fall in, from
                Copernicus DEM GLO-30 (needs numpy and tifffile; imagecodecs too if a file will not open). With
                --data, the data folder's own terrain.sqlite is the starting point, so what it already shows stays.
+     overview   with --overview FILE: tools/build_overview_osm.py adds main roads and towns of a wider, filtered
+               extract around the region, for when the map is zoomed out (how to make FILE: see that tool)
   5 addresses  with --addresses: tools/build_addresses_osm.py -> <work>/out/addresses/<code>.sqlite, one per region
                house addresses from the raw extract, found as "Kaiserstraße 12, Buseck"
   6 install    with --data: the built files go to <data>/derived/geo/, what they replace moves to <work>/replaced-<time>/,
@@ -148,6 +150,7 @@ def main():
     ap.add_argument('--label', help='what the whole map is called when it has several regions (default: their labels, joined)')
     ap.add_argument('--gpkg', help='one region only: a Geofabrik "free" .gpkg or .gpkg.zip already on this computer')
     ap.add_argument('--pbf', help='one region only: its .osm.pbf (or .osm) already on this computer')
+    ap.add_argument('--overview', metavar='FILE', help='a filtered .osm.pbf of the wider area: main roads and towns around the region')
     ap.add_argument('--addresses', action='store_true', help='also build the house address search from the .osm.pbf')
     ap.add_argument('--terrain', action='store_true', help='also build relief and contour lines from Copernicus DEM GLO-30')
     ap.add_argument('--dem-base', help='another place to fetch the elevation cells from (see tools/fetch_copernicus_dem.py --base)')
@@ -188,6 +191,8 @@ def main():
         if pbf and not a.no_boundaries:
             places += ['--pbf', f"{pbf}={r['label']}"]
     run(*places)
+    if a.overview:      # after the place finder, which lists the region's own places only
+        run(TOOLS / 'build_overview_osm.py', Path(a.overview).expanduser(), out / 'map.sqlite')
     if a.addresses:
         for r, _, pbf in got:
             print('addresses:', r['label'], flush=True)

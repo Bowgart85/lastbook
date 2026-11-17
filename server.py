@@ -1621,6 +1621,9 @@ def map_info():
         geo.append({'label': 'Aerial photos, whole US (USGS The National Map: USDA NAIP and other orthoimagery)', 'status': 'Zoom 0-15 nationwide, 16 in California and towns · downloading'})
     pack = pack_info()
     extra = {'aerial': has_aerial()}
+    # Data a region map adds that the map's fixed credit line does not name (tools/build_region.py --terrain)
+    if TERRAINDB.exists() and any('Copernicus' in v for v in _distinct(TERRAINDB, "SELECT value FROM meta WHERE key='source'") if v):
+        extra['credit'] = 'Copernicus DEM © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA'
     if pack:
         extra.update(map_contents())
         geo = pack_datasets(extra)
@@ -1633,6 +1636,9 @@ def pack_datasets(have):
     out = [{'label': 'Main roads, towns and water for the whole US (OpenStreetMap, USGS)', 'status': 'Shown at every zoom level'}]
     if have['detail']:
         out.append({'label': f'Streets, places and help points (OpenStreetMap) for {area}', 'status': 'Street detail stops at the edge of this area.' if have['bounds'] else 'Shown when you zoom in'})
+        overview = _distinct(MAPDB, "SELECT value FROM meta WHERE key='overview'")   # tools/build_overview_osm.py
+        if overview:
+            out.append({'label': f'Around that area: {overview[0]}', 'status': 'Shown when you zoom out'})
     else:
         out.append({'label': 'No street detail or help points', 'status': 'This download has only the base map. Hospitals, water taps and side streets are not in it.'})
     if PLACEDB.exists():

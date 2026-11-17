@@ -16,7 +16,9 @@ Etappe 1 ist als Code vorhanden und mit kleinen Testdaten geprüft. **Mit echten
 | Heimserver | `packaging/docker/Dockerfile`, `compose.yaml`, `.dockerignore` | Server lief mit genau diesen Dateien und Abhängigkeiten; **Image nicht gebaut** |
 | Gelände: Relief, Höhenlinien, Höhenangaben, 3D aus Copernicus DEM GLO-30 | `tools/fetch_copernicus_dem.py`, `tools/build_terrain.py` (`--src`, `--out`), `build_region.py --terrain` | Test mit künstlicher Höhenkachel, Höhe auf 0,5 m genau; Server liefert Kacheln; **echte Kacheln nicht** |
 | Adresssuche: „Kaiserstraße 12, Buseck", auch als „Kaiserstr." oder „Kaiserstrasse" | `tools/build_addresses_osm.py`, `engine/address_search.py`, `server.py`, `build_region.py --addresses` | Tests + `/api/places`; die 8 bestehenden Adresstests (US) bleiben grün |
-| Tests | `app/tests/test_region_map.py` (11 Tests) | grün |
+| Übersicht um die Region herum (Fernstraßen, Städte) für weite Zoomstufen | `tools/build_overview_osm.py`, `build_region.py --overview DATEI` | Test; **optional, nicht Teil des Fahrplans** |
+| Quellenangabe Copernicus auf der Karte, Kartenpanel nennt Höhenquelle und Übersicht | `server.py`, `web/map.js` | `/api/map/info`; Anzeige **nicht im Browser** gesehen |
+| Tests | `app/tests/test_region_map.py` (12 Tests) | grün |
 
 Bestehende Tests: 319 gelaufen, 1 Fehler in `test_setup.Recommend.test_hardware_here`. Der Test erwartet macOS oder Windows und schlägt unter Linux auch ohne diese Änderungen fehl.
 
@@ -55,6 +57,15 @@ python3 tools/build_region.py tools/regions/hessen.json --geofabrik europe/franc
 
 **Ganz Europa in Straßendetail ist nicht sinnvoll.** Jede Region bringt ihr ganzes Straßennetz mit; die US-Gesamtkarte des Originals liegt bei rund 80 GB, Europa läge in derselben Größenordnung oder darüber (nicht gemessen). Geofabrik bietet das benötigte GeoPackage außerdem nur für kleinere Gebiete an, ein großes Land muss aus seinen Teilen gebaut werden. Sinnvoll: Heimatregion plus Nachbarn in Detail. Für eine europaweite Übersicht (Fernstraßen, Städte) fehlt noch ein eigener Builder, siehe Etappe 2.
 
+Optional, später: Übersicht um Hessen herum, damit die Karte herausgezoomt nicht leer ist. Dafür einmal einen Deutschland-Auszug filtern (braucht das Paket `osmium-tool`; der Deutschland-Auszug hat mehrere GB) und den Lauf mit `--overview` wiederholen:
+
+```
+osmium tags-filter germany-latest.osm.pbf w/highway=motorway,trunk,primary n/place=city,town -o germany-overview.osm.pbf
+python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain --addresses --overview germany-overview.osm.pbf
+```
+
+Mit einem Europa-Auszug geht dasselbe; der Download ist dann sehr groß (nicht gemessen, Größenordnung 30 GB).
+
 Lastbook muss dabei geschlossen sein. Ersetzte Dateien landen in `~/lastbook-work/replaced-<Zeit>/`.
 
 ### So startet der Heimserver
@@ -79,8 +90,8 @@ Auf dem iPhone einmal `http://<IP des Servers>:8890/?key=<Schlüssel>` öffnen. 
 ### Bekannte Lücken in Etappe 1
 
 - Die Ortssuche wird ersetzt, US-Ortsnamen sind danach nicht mehr enthalten.
-- Texte im Kartenpanel nennen weiter die US-Basiskarte („Main roads ... for the whole US").
-- Die Quellenzeile der Karte nennt weiter US-Behörden; OpenStreetMap steht bereits darin.
+- Das Kartenpanel nennt weiter die US-Basiskarte des Packs („Main roads ... for the whole US"); das stimmt, solange das Pack sie enthält.
+- Die feste Quellenzeile der Karte nennt weiter US-Behörden; OpenStreetMap steht darin, Copernicus wird bei Bedarf angehängt.
 - Adressen ohne `addr:city` oder `addr:postcode` in OSM bekommen Ort und PLZ aus der PLZ-Fläche und der Gemeinde, in der sie liegen (braucht `shapely`; ohne das Paket bleibt das Feld leer). In kreisfreien Städten wird der Kreisname genommen, sofern er nicht „kreis" enthält; außerhalb Hessens kann diese Faustregel danebenliegen.
 - Eine Straße, die eine Regionsgrenze kreuzt, liegt in beiden Auszügen und wird doppelt gespeichert. Das Bild ändert sich nicht.
 
@@ -145,7 +156,7 @@ Verworfen: (a) die US-Builder direkt umschreiben – erschwert Updates vom Origi
 - Gebäude aus OSM.
 - Gewässer aus OSM.
 - ~~Adresssuche aus OSM-Adressen.~~ Als Code erledigt, siehe Stand.
-- Europaweite Übersichtskarte (Fernstraßen, Städte, große Gewässer) für die weiten Zoomstufen.
+- ~~Europaweite Übersichtskarte für die weiten Zoomstufen.~~ Als Code erledigt (Fernstraßen und Städte; ohne Gewässer und Grenzen), siehe Stand.
 
 ## Datenquellen (vor Nutzung prüfen: URL, Lizenz, Aktualität)
 

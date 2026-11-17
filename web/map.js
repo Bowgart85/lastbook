@@ -174,6 +174,7 @@ const MapView = (() => {
     document.addEventListener('keydown', st.onKey);
     layerCount();
     fetch('/api/map/info').then(r => r.json()).then(info => {
+      if (info.credit) { const attr = document.querySelector('.mapattr'); if (attr && !attr.textContent.includes(info.credit)) attr.textContent += ' · ' + info.credit; }
       if (!st) return;
       st.national = info.national; st.ver = info.version; st.aerialDetail = info.aerial_detail; st.aerialRev = info.aerial_rev; st.terrainCircle = info.terrain_circle;
       describe(info); if (openWhole) fit(wholeMap(), 0.92, true); coverage(); draw();

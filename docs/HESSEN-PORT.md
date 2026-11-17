@@ -16,7 +16,7 @@ Etappe 1 ist als Code vorhanden und mit kleinen Testdaten geprüft. **Mit echten
 | Heimserver | `packaging/docker/Dockerfile`, `compose.yaml`, `.dockerignore` | Server lief mit genau diesen Dateien und Abhängigkeiten; **Image nicht gebaut** |
 | Gelände: Relief, Höhenlinien, Höhenangaben, 3D aus Copernicus DEM GLO-30 | `tools/fetch_copernicus_dem.py`, `tools/build_terrain.py` (`--src`, `--out`), `build_region.py --terrain` | Test mit künstlicher Höhenkachel, Höhe auf 0,5 m genau; Server liefert Kacheln; **echte Kacheln nicht** |
 | Adresssuche: „Kaiserstraße 12, Buseck", auch als „Kaiserstr." oder „Kaiserstrasse" | `tools/build_addresses_osm.py`, `engine/address_search.py`, `server.py`, `build_region.py --addresses` | Tests + `/api/places`; die 8 bestehenden Adresstests (US) bleiben grün |
-| Übersicht um die Region herum (Fernstraßen, Städte) für weite Zoomstufen | `tools/build_overview_osm.py`, `build_region.py --overview DATEI` | Test; **optional, nicht Teil des Fahrplans** |
+| Übersicht um die Region herum (Fernstraßen, Städte) für weite Zoomstufen | `tools/filter_overview_osm.py` (Auszug filtern), `tools/build_overview_osm.py`, `build_region.py --overview DATEI` | Tests; **optional, nicht Teil des Fahrplans** |
 | Quellenangabe Copernicus auf der Karte, Kartenpanel nennt Höhenquelle und Übersicht | `server.py`, `web/map.js` | `/api/map/info`; Anzeige **nicht im Browser** gesehen |
 | Tests | `app/tests/test_region_map.py` (12 Tests) | grün |
 
@@ -57,10 +57,10 @@ python3 tools/build_region.py tools/regions/hessen.json --geofabrik europe/franc
 
 **Ganz Europa in Straßendetail ist nicht sinnvoll.** Jede Region bringt ihr ganzes Straßennetz mit; die US-Gesamtkarte des Originals liegt bei rund 80 GB, Europa läge in derselben Größenordnung oder darüber (nicht gemessen). Geofabrik bietet das benötigte GeoPackage außerdem nur für kleinere Gebiete an, ein großes Land muss aus seinen Teilen gebaut werden. Sinnvoll: Heimatregion plus Nachbarn in Detail. Für eine europaweite Übersicht (Fernstraßen, Städte) fehlt noch ein eigener Builder, siehe Etappe 2.
 
-Optional, später: Übersicht um Hessen herum, damit die Karte herausgezoomt nicht leer ist. Dafür einmal einen Deutschland-Auszug filtern (braucht das Paket `osmium-tool`; der Deutschland-Auszug hat mehrere GB) und den Lauf mit `--overview` wiederholen:
+Optional, später: Übersicht um Hessen herum, damit die Karte herausgezoomt nicht leer ist. Dafür einmal einen Deutschland-Auszug filtern (`germany-latest.osm.pbf` von download.geofabrik.de/europe, knapp 5 GB; das Python-Paket `osmium` reicht, `osmium-tool` ist nicht nötig) und den Lauf mit `--overview` wiederholen:
 
 ```
-osmium tags-filter germany-latest.osm.pbf w/highway=motorway,trunk,primary n/place=city,town -o germany-overview.osm.pbf
+python3 tools/filter_overview_osm.py germany-latest.osm.pbf germany-overview.osm.pbf
 python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain --addresses --overview germany-overview.osm.pbf
 ```
 

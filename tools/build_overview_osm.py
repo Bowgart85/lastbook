@@ -7,13 +7,15 @@ A region map made by tools/build_map.py ends at the region's edge; zoomed out, t
 This adds, for the area of a larger extract (a country, or Europe):
   motorways (from zoom 5), trunk roads (6), primary roads (8)   named by their ref ("A 5") where they have one
   cities (zoom 6; over 300,000 people: 5) and towns (9)
-Nothing is added where the map already has street detail (0.05° cells that hold small features), so the
-region itself is not drawn twice. Run again, it first removes what it added before.
+No road is added where the map already has street detail (0.05° cells that hold small features), and no city
+or town the map already names within about 10 km, so the region itself is not drawn twice. A town just across
+the region's edge is added: its cell has the region's streets, but the region map does not hold the town.
+Run again, it first removes what it added before.
 
-Give it a filtered extract, not a whole country: the reader keeps every node's position in memory. With the
-osmium command-line tool (package osmium-tool):
+Give it a filtered extract, not a whole country: the reader keeps every node's position in memory.
+tools/filter_overview_osm.py makes one with the osmium Python package:
 
-  osmium tags-filter germany-latest.osm.pbf w/highway=motorway,trunk,primary n/place=city,town -o germany-overview.osm.pbf
+  python3 tools/filter_overview_osm.py germany-latest.osm.pbf germany-overview.osm.pbf
 
 Needs the osmium Python package. The extract is only read; the map is changed in place (close the app first).
 """
@@ -26,6 +28,7 @@ from pathlib import Path
 
 Q = 1e6
 CELL = 0.05
+NEAR = 0.1          # degrees: a place of the same name this close in the region map is the same place
 ROADS = {'motorway': (5, 0.0005), 'trunk': (6, 0.0005), 'primary': (8, 0.0003)}     # class: (first zoom, simplify tolerance in degrees)
 PLACES = {'city': 6, 'town': 9}
 
@@ -84,6 +87,9 @@ def main():
     for x0, x1, y0, y1 in db.execute('SELECT minx, maxx, miny, maxy FROM feat_idx WHERE minz >= 13 AND maxx - minx < 0.5 AND maxy - miny < 0.5'):
         (cx0, cy0), (cx1, cy1) = cell(x0, y0), cell(x1, y1)
         detailed.update((cx, cy) for cx in range(cx0, cx1 + 1) for cy in range(cy0, cy1 + 1))
+    named = {}      # the places the region map names already, to tell a town it holds from one just beyond its edge
+    for name, lon, lat in db.execute("SELECT f.name, i.minx, i.miny FROM feat f JOIN feat_idx i ON i.id=f.id WHERE f.layer='place' AND f.name IS NOT NULL"):
+        named.setdefault(name, []).append((lon, lat))
     first = fid = db.execute('SELECT COALESCE(MAX(id),0) FROM feat').fetchone()[0] + 1
     roads = places = skipped = 0
 
@@ -109,7 +115,8 @@ def main():
             add('road', tags['highway'], tags.get('ref') or tags.get('name'), minz, simplify(flat, tol))
             roads += 1
         elif obj.is_node() and tags.get('place') in PLACES and tags.get('name') and obj.location.valid():
-            if cell(obj.location.lon, obj.location.lat) in detailed:
+            lon, lat = obj.location.lon, obj.location.lat
+            if any(abs(lon - x) < NEAR and abs(lat - y) < NEAR for x, y in named.get(tags['name'], ())):
                 skipped += 1
                 continue
             minz = PLACES[tags['place']]

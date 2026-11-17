@@ -266,16 +266,31 @@ class RegionMap(unittest.TestCase):
   <tag k="addr:city" v="Gießen"/><tag k="addr:postcode" v="35390"/></node>
  <node id="3" version="1" lat="50.6100" lon="8.7900"><tag k="addr:housenumber" v="3;5"/><tag k="addr:street" v="Am Mühlberg"/></node>
  <node id="4" version="1" lat="50.6200" lon="8.7900"><tag k="addr:housenumber" v="7"/></node>
+ <node id="5" version="1" lat="50.5805" lon="8.6705"><tag k="addr:housenumber" v="9"/><tag k="addr:street" v="Am Mühlberg"/></node>
  <node id="11" version="1" lat="50.6010" lon="8.7810"/><node id="12" version="1" lat="50.6010" lon="8.7830"/>
  <node id="13" version="1" lat="50.6030" lon="8.7830"/><node id="14" version="1" lat="50.6030" lon="8.7810"/>
+ <node id="31" version="1" lat="50.59" lon="8.75"/><node id="32" version="1" lat="50.59" lon="8.85"/>
+ <node id="33" version="1" lat="50.65" lon="8.85"/><node id="34" version="1" lat="50.65" lon="8.75"/>
+ <node id="51" version="1" lat="50.55" lon="8.60"/><node id="52" version="1" lat="50.55" lon="8.72"/>
+ <node id="53" version="1" lat="50.59" lon="8.72"/><node id="54" version="1" lat="50.59" lon="8.60"/>
  <way id="20" version="1"><nd ref="11"/><nd ref="12"/><nd ref="13"/><nd ref="14"/><nd ref="11"/>
   <tag k="building" v="yes"/><tag k="addr:housenumber" v="1"/><tag k="addr:street" v="Schloßgasse"/><tag k="addr:city" v="Buseck"/></way>
+ <way id="40" version="1"><nd ref="31"/><nd ref="32"/><nd ref="33"/><nd ref="34"/><nd ref="31"/></way>
+ <way id="60" version="1"><nd ref="51"/><nd ref="52"/><nd ref="53"/><nd ref="54"/><nd ref="51"/></way>
+ <relation id="100" version="1"><member type="way" ref="40" role="outer"/>
+  <tag k="type" v="boundary"/><tag k="boundary" v="postal_code"/><tag k="postal_code" v="35418"/></relation>
+ <relation id="101" version="1"><member type="way" ref="40" role="outer"/>
+  <tag k="type" v="boundary"/><tag k="boundary" v="administrative"/><tag k="admin_level" v="8"/><tag k="name" v="Buseck"/></relation>
+ <relation id="102" version="1"><member type="way" ref="60" role="outer"/>
+  <tag k="type" v="boundary"/><tag k="boundary" v="administrative"/><tag k="admin_level" v="6"/><tag k="name" v="Darmstadt"/></relation>
+ <relation id="103" version="1"><member type="way" ref="60" role="outer"/>
+  <tag k="type" v="boundary"/><tag k="boundary" v="administrative"/><tag k="admin_level" v="6"/><tag k="name" v="Landkreis Gießen"/></relation>
 </osm>
 ''', encoding='utf-8')
         geo = self.dir / 'geo-addr'
         r = run(ROOT / 'tools/build_addresses_osm.py', osm, geo / 'addresses/HE.sqlite', '--code', 'HE')
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('5 addresses', r.stdout)                     # 2 + the two of "3;5" + the building; the node with no street is left out
+        self.assertIn('6 addresses', r.stdout)                     # 2 + the two of "3;5" + one more + the building; the node with no street is left out
 
         def found(q):
             return [(h['name'], h['detail']) for h in find_addresses(q, geo)]
@@ -287,7 +302,17 @@ class RegionMap(unittest.TestCase):
         self.assertEqual(found('12a Kaiserstr Giessen'), [both[0]])        # ß typed as ss, in the town too
         self.assertEqual(found('12a Kaiserstraße 35418'), [both[1]])
         self.assertEqual(found('13 Kaiserstraße'), [])                     # never a neighbouring house
-        self.assertEqual(found('5 Am Muehlberg'), [('Am Mühlberg 5', '')])
+        if importlib.util.find_spec('shapely'):
+            self.assertIn('filled in from boundaries: 3 towns, 3 postal codes', r.stdout)
+            # no town or postal code of its own: both come from the areas it lies in
+            self.assertEqual(found('5 Am Muehlberg'), [('Am Mühlberg 5', '35418 Buseck')])
+            self.assertEqual(found('5 Am Mühlberg Buseck'), [('Am Mühlberg 5', '35418 Buseck')])
+            # no municipality there: the district that is a city of its own names it, the one called "Landkreis" does not
+            self.assertEqual(found('9 Am Mühlberg'), [('Am Mühlberg 9', 'Darmstadt')])
+            # what the mapper wrote stays: Gießen keeps its own town and code though it lies in that district's square
+            self.assertEqual(found('12a Kaiserstr Giessen'), [both[0]])
+        else:
+            self.assertEqual(found('5 Am Muehlberg'), [('Am Mühlberg 5', '')])
         hit = find_addresses('1 Schlossgasse', geo)[0]
         self.assertEqual((hit['name'], hit['source']), ('Schloßgasse 1', 'OpenStreetMap'))
         self.assertAlmostEqual(hit['lat'], 50.602, places=4)               # the middle of the outline

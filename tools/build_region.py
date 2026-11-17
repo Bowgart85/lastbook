@@ -191,7 +191,8 @@ def main():
     if a.addresses:
         for r, _, pbf in got:
             print('addresses:', r['label'], flush=True)
-            run(TOOLS / 'build_addresses_osm.py', pbf, out / 'addresses' / f"{r['code']}.sqlite", '--code', r['code'])
+            run(TOOLS / 'build_addresses_osm.py', pbf, out / 'addresses' / f"{r['code']}.sqlite", '--code', r['code'],
+                '--levels', r.get('admin_levels', '6,8'))
     data = Path(a.data).expanduser().resolve() if a.data else None
     built = ['map.sqlite', 'places.sqlite']
     if a.terrain:

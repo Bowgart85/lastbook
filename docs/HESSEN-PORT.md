@@ -29,7 +29,7 @@ Vorher, ohne Claude Code (läuft nebenher, kostet nur Wartezeit):
 
 Mit Claude Code, in dieser Reihenfolge. Jeder Schritt ist für sich nützlich; wenn die Zeit knapp wird, nach Schritt 4 aufhören.
 
-3. `pip install osmium numpy tifffile imagecodecs` (am besten in einem venv), dann `python3 -B -m unittest app.tests.test_region_map`
+3. `pip install osmium shapely numpy tifffile imagecodecs` (am besten in einem venv), dann `python3 -B -m unittest app.tests.test_region_map`
 4. Kleiner Probelauf zuerst, um Download-Adressen und Laufzeit zu sehen, ohne `--terrain`:
    `python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --no-boundaries`
    Schlägt der Download fehl: Adressen auf download.geofabrik.de nachsehen und in `tools/regions/hessen.json` korrigieren.
@@ -42,6 +42,7 @@ Mit Claude Code, in dieser Reihenfolge. Jeder Schritt ist für sich nützlich; w
 ```
 pip install osmium                      # nur für PLZ, Gemeinden, Kreise
 pip install numpy tifffile imagecodecs  # nur für --terrain
+pip install shapely numpy               # nur für --addresses: Ort und PLZ aus Grenzflächen ergänzen
 python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain --addresses
 ```
 
@@ -80,7 +81,7 @@ Auf dem iPhone einmal `http://<IP des Servers>:8890/?key=<Schlüssel>` öffnen. 
 - Die Ortssuche wird ersetzt, US-Ortsnamen sind danach nicht mehr enthalten.
 - Texte im Kartenpanel nennen weiter die US-Basiskarte („Main roads ... for the whole US").
 - Die Quellenzeile der Karte nennt weiter US-Behörden; OpenStreetMap steht bereits darin.
-- Adressen ohne `addr:city` und `addr:postcode` in OSM werden über Straße und Hausnummer gefunden, aber nicht über den Ort. Wie viele das in Hessen betrifft, ist ungeprüft. Abhilfe wäre, Ort und PLZ aus den Grenzflächen zuzuordnen.
+- Adressen ohne `addr:city` oder `addr:postcode` in OSM bekommen Ort und PLZ aus der PLZ-Fläche und der Gemeinde, in der sie liegen (braucht `shapely`; ohne das Paket bleibt das Feld leer). In kreisfreien Städten wird der Kreisname genommen, sofern er nicht „kreis" enthält; außerhalb Hessens kann diese Faustregel danebenliegen.
 - Eine Straße, die eine Regionsgrenze kreuzt, liegt in beiden Auszügen und wird doppelt gespeichert. Das Bild ändert sich nicht.
 
 ## Ziel

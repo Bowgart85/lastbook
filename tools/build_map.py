@@ -195,7 +195,12 @@ def main():
         add('bldg', cls or '', None, 15, [simplify(parts[0], 0.000002)])
     print('buildings', fid[0], round(time.time() - t0), flush=True)
     dst.commit()
+    counties = set()    # an extract can hold the same county as two points (Werra-Meißner-Kreis in Hessen): one label is enough
     for parts, (cls, pop, name) in each('gis_osm_places_free', 'fclass,population,name'):
+        if cls == 'county' and name:
+            if name in counties:
+                continue
+            counties.add(name)
         if name:
             z = PLACE_Z.get(cls, 14)
             if cls in ('city', 'town') and pop and int(pop) > 300000:

@@ -97,19 +97,28 @@ class RegionMap(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.dir = Path(cls.tmp.name)
+        cls.opened = []
         make_gpkg(cls.dir / 'region.gpkg')
         cls.map = cls.dir / 'map.sqlite'
         cls.built = run(ROOT / 'tools/build_map.py', cls.dir / 'region.gpkg', cls.map, '--source', 'OpenStreetMap, test extract', '--as-of', '2026-11-01')
 
     @classmethod
     def tearDownClass(cls):
+        for con in cls.opened:      # Windows does not delete a file that is still open
+            con.close()
         cls.tmp.cleanup()
+
+    @classmethod
+    def db(cls, path):
+        con = sqlite3.connect(path)
+        cls.opened.append(con)
+        return con
 
     def places(self, *extra):
         out = self.dir / f'places-{len(extra)}.sqlite'
         r = run(ROOT / 'tools/build_places_osm.py', '--map', self.map, '--out', out, '--label', 'Hessen', *extra)
         self.assertEqual(r.returncode, 0, r.stderr)
-        return sqlite3.connect(out)
+        return self.db(out)
 
     def find(self, db, q):
         return db.execute('SELECT p.name,p.kind,p.detail,p.lat,p.lon FROM place_fts f JOIN place p ON p.id=f.rowid WHERE place_fts MATCH ? ORDER BY p.rank',
@@ -117,7 +126,7 @@ class RegionMap(unittest.TestCase):
 
     def test_map_holds_the_region(self):
         self.assertEqual(self.built.returncode, 0, self.built.stderr)
-        db = sqlite3.connect(self.map)
+        db = self.db(self.map)
         meta = dict(db.execute('SELECT key,value FROM meta'))
         self.assertEqual(meta['source'], 'OpenStreetMap, test extract')
         self.assertEqual(meta['data_as_of'], '2026-11-01')
@@ -128,9 +137,26 @@ class RegionMap(unittest.TestCase):
     def test_without_options_the_map_is_described_as_before(self):
         out = self.dir / 'plain.sqlite'
         self.assertEqual(run(ROOT / 'tools/build_map.py', self.dir / 'region.gpkg', out).returncode, 0)
-        meta = dict(sqlite3.connect(out).execute('SELECT key,value FROM meta'))
+        meta = dict(self.db(out).execute('SELECT key,value FROM meta'))
         self.assertEqual(meta['bounds'], '-121.36,32.50,-114.10,35.89')
         self.assertIn('socal', meta['source'])
+
+    def test_a_county_named_twice_is_labelled_once(self):
+        """Hessen's extract holds Werra-Meißner-Kreis as two county points; the map names it once."""
+        src, out = self.dir / 'twice.gpkg', self.dir / 'twice.sqlite'
+        make_gpkg(src)
+        db = sqlite3.connect(src)
+        for lon, lat, name in ((9.933, 51.180, 'Werra-Meißner-Kreis'), (9.925, 51.249, 'Werra-Meißner-Kreis'), (9.25, 50.60, 'Vogelsbergkreis')):
+            db.execute("INSERT INTO gis_osm_places_free VALUES (?,?,?,?)", (point(lon, lat), 'county', None, name))
+        db.execute("INSERT INTO gis_osm_places_free VALUES (?,?,?,?)", (point(8.80, 50.61), 'village', 500, 'Großen-Buseck'))   # two villages may share a name
+        db.commit()
+        db.close()
+        r = run(ROOT / 'tools/build_map.py', src, out, '--source', 'test', '--as-of', '2026-11-17')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = self.db(out)
+        self.assertEqual([n for (n,) in got.execute("SELECT name FROM feat WHERE layer='place' AND cls='county' ORDER BY name")],
+                         ['Vogelsbergkreis', 'Werra-Meißner-Kreis'])
+        self.assertEqual(got.execute("SELECT COUNT(*) FROM feat WHERE layer='place' AND name='Großen-Buseck'").fetchone()[0], 2)
 
     def test_an_unknown_option_is_refused(self):
         self.assertNotEqual(run(ROOT / 'tools/build_map.py', self.dir / 'region.gpkg', self.dir / 'no.sqlite', '--bound', '1,2,3,4').returncode, 0)
@@ -167,7 +193,7 @@ class RegionMap(unittest.TestCase):
         self.assertEqual(run(ROOT / 'tools/build_map.py', self.dir / 'region.gpkg', out, '--source', 'first', '--as-of', '2026-11-02').returncode, 0)
         r = run(ROOT / 'tools/build_map.py', self.dir / 'second.gpkg', out, '--source', 'second', '--as-of', '2026-10-30', '--append')
         self.assertEqual(r.returncode, 0, r.stderr)
-        db = sqlite3.connect(out)
+        db = self.db(out)
         self.assertEqual([n for (n,) in db.execute("SELECT name FROM feat WHERE layer='road' ORDER BY id")], ['Kaiserstraße', 'A 5', 'Würzburger Straße'])
         self.assertEqual(db.execute('SELECT COUNT(*),COUNT(DISTINCT id) FROM feat_idx').fetchone(), (6, 6))    # 2 roads and 2 places, then 1 and 1
         self.assertEqual([n for (n,) in db.execute('SELECT name FROM poi ORDER BY id')], ['Universitätsklinikum', 'Stadt-Apotheke'])
@@ -200,11 +226,11 @@ class RegionMap(unittest.TestCase):
             files.append(f)
         r = run(ROOT / 'tools/build_region.py', *files, '--work', work, '--data', data)
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
-        places = sqlite3.connect(data / 'derived/geo/places.sqlite')
+        places = self.db(data / 'derived/geo/places.sqlite')
         self.assertEqual([(p[0], p[2]) for p in self.find(places, '35418')], [('35418', 'Buseck, Hessen')])
         self.assertEqual([(p[0], p[2]) for p in self.find(places, '63739')], [('63739', 'Aschaffenburg, Bayern')])
         self.assertEqual([p[2] for p in self.find(places, 'Aschaffenburg') if p[1] == 'town'], ['Hessen, Bayern (OpenStreetMap)'])
-        roads = sqlite3.connect(data / 'derived/geo/map.sqlite').execute("SELECT COUNT(*) FROM feat WHERE layer='road'").fetchone()[0]
+        roads = self.db(data / 'derived/geo/map.sqlite').execute("SELECT COUNT(*) FROM feat WHERE layer='road'").fetchone()[0]
         self.assertEqual(roads, 3)
         map_set = json.loads((data / 'map-set.json').read_text())
         self.assertEqual(map_set['name'], 'HE+BY')
@@ -234,7 +260,7 @@ class RegionMap(unittest.TestCase):
         self.assertIn('1 cells', r.stdout)                         # 8-9°E is there; 9-10°E is "sea"
         r = run(ROOT / 'tools/build_terrain.py', '--src', dem, '--out', out, '--workers', '1', '--source-name', 'Copernicus DEM GLO-30')
         self.assertEqual(r.returncode, 0, r.stderr)
-        db = sqlite3.connect(out)
+        db = self.db(out)
         self.assertEqual(dict(db.execute('SELECT key,value FROM meta'))['source'], 'Copernicus DEM GLO-30')
         self.assertEqual([z for (z,) in db.execute('SELECT DISTINCT z FROM tile ORDER BY z')], list(range(4, 13)))
         want_lat, want_lon, z = 50.6, 8.7833, 12                   # Großen-Buseck
@@ -345,12 +371,12 @@ class RegionMap(unittest.TestCase):
  <way id="12" version="1"><nd ref="3"/><nd ref="5"/><tag k="highway" v="residential"/><tag k="name" v="Not a main road"/></way>
 </osm>
 ''', encoding='utf-8')
-        before = sqlite3.connect(target).execute('SELECT COUNT(*) FROM feat').fetchone()[0]
+        before = self.db(target).execute('SELECT COUNT(*) FROM feat').fetchone()[0]
         for _ in range(2):                                          # the second run replaces the first, it does not double it
             r = run(ROOT / 'tools/build_overview_osm.py', osm, target)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn('1 main roads, 2 cities and towns added; 2 left out', r.stdout)
-        db = sqlite3.connect(target)
+        db = self.db(target)
         added = db.execute('SELECT f.layer,f.cls,f.name,f.minz FROM feat f WHERE f.id > ? ORDER BY f.id', (before,)).fetchall()
         self.assertEqual(added, [('place', 'city', 'Berlin', 5), ('place', 'city', 'Darmstadt', 6), ('road', 'motorway', 'A 5', 5)])
         self.assertEqual(db.execute('SELECT COUNT(*) FROM feat').fetchone()[0], before + 3)

@@ -79,7 +79,8 @@ const MapView = (() => {
   const y2lat = (y, z) => { const n = Math.PI - 2 * Math.PI * y / 2 ** z; return 180 / Math.PI * Math.atan(Math.sinh(n)) };
   const escH = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const $ = id => document.getElementById(id);
-  const dist = km => km < 1.6 ? Math.round(km * 1000) + ' m' : (km / 1.609).toFixed(km < 16 ? 1 : 0) + ' mi';
+  const dist = km => METRIC ? (km < 1 ? Math.round(km * 1000) + ' m' : km.toLocaleString(undefined, { maximumFractionDigits: km < 10 ? 1 : 0 }) + ' km')
+    : km < 1.6 ? Math.round(km * 1000) + ' m' : (km / 1.609).toFixed(km < 16 ? 1 : 0) + ' mi';
   const kmBetween = (a, b, c, d) => { const r = Math.PI / 180, x = Math.sin((c - a) * r / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin((d - b) * r / 2) ** 2; return 12742 * Math.asin(Math.sqrt(x)) };
   const sym = (l, size = 22) => `<i class="msym" style="background:${l.col};width:${size}px;height:${size}px">${escH(l.sym)}</i>`;
   const layerOf = cls => BY_CLS[cls] || { sym: '•', col: '#555', label: cls };
@@ -101,7 +102,7 @@ const MapView = (() => {
     if (!on.length) on = DEFAULT_LAYERS;
     main.classList.add('map-page');
     document.title = 'Map · Lastbook';
-    main.innerHTML = `<div class="maphead"><h1>Map &amp; nearby help</h1><p class="small muted">Offline: works with no internet. Shows what was mapped by 25 Oct 2026 — not damage, closures or hazards.</p>${IN_WINDOW ? '<a class="btn plain" href="/ui/setup.html#manage">Map downloads</a>' : ''}</div>
+    main.innerHTML = `<div class="maphead"><h1>Map &amp; nearby help</h1><p class="small muted">Offline: works with no internet. Shows what was mapped<span id="masof"></span> — not damage, closures or hazards.</p>${IN_WINDOW ? '<a class="btn plain" href="/ui/setup.html#manage">Map downloads</a>' : ''}</div>
     <div class="mapgrid"><div class="mapwrap" id="mapwrap">
       <canvas id="mapc" tabindex="0" role="application" aria-label="Map. Arrow keys move, plus and minus zoom, Escape closes details. The list beside the map gives the same places as text."></canvas>
       <div class="map-top">
@@ -175,6 +176,8 @@ const MapView = (() => {
     layerCount();
     fetch('/api/map/info').then(r => r.json()).then(info => {
       if (info.credit) { const attr = document.querySelector('.mapattr'); if (attr && !attr.textContent.includes(info.credit)) attr.textContent += ' · ' + info.credit; }
+      const asOf = info.meta && /^\d{4}-\d{2}-\d{2}/.test(info.meta.data_as_of || '') && new Date(info.meta.data_as_of.slice(0, 10) + 'T00:00:00');  // the map's own date, not a fixed one
+      if (asOf && $('masof')) $('masof').textContent = ' by ' + asOf.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
       if (!st) return;
       st.national = info.national; st.ver = info.version; st.aerialDetail = info.aerial_detail; st.aerialRev = info.aerial_rev; st.terrainCircle = info.terrain_circle;
       describe(info); if (openWhole) fit(wholeMap(), 0.92, true); coverage(); draw();
@@ -402,7 +405,7 @@ const MapView = (() => {
     if (L.rail) { g.strokeStyle = C.rail; g.lineWidth = 1.4 * R; g.setLineDash([5 * R, 3 * R]); for (const [, , parts] of L.rail) for (const p of parts) { line(p); g.stroke() } g.setLineDash([]) }
     g.globalAlpha = 1;
     const labels = [];
-    if (L.place) for (const [cls, name, parts] of L.place) labels.push({ x: parts[0][0] / EXT, y: parts[0][1] / EXT, name, cls, pri: { city: 1, town: 2, suburb: 3, village: 3, county: 0, region: 0 }[cls] ?? 4 });
+    if (L.place) for (const [cls, name, parts] of L.place) labels.push({ x: parts[0][0] / EXT, y: parts[0][1] / EXT, name, cls, pri: { city: 0, town: 2, suburb: 3, village: 3, county: 1, region: 0 }[cls] ?? 4 });   // a city keeps its name where a county's label would cover it
     if (z >= 15 && L.road) for (const [cls, name, parts] of L.road) { if (!name || roadStyle(cls)[1] < 2) continue; const p = parts[0]; if (p.length < 4) continue; const i = (p.length / 4 | 0) * 2; labels.push({ x: p[i] / EXT, y: p[i + 1] / EXT, name, cls: 'road', pri: 6, ang: Math.atan2(p[i + 3] - p[i + 1], p[i + 2] - p[i]) }) }
     return { canvas: c, labels };
   }

@@ -59,7 +59,10 @@ def from_map(db, path, label):
     for cls, name, lon, lat in src.execute("SELECT cls,name,lon,lat FROM poi WHERE name IS NOT NULL AND name<>''"):
         db.execute(INSERT, (name, cls.replace('_', ' '), spelled(name, detail), lat, lon, 4, OSM))
         n += 1
-    for cls, name, g in src.execute("SELECT cls,name,geom FROM feat WHERE layer='place' AND name IS NOT NULL"):
+    # Towns of an overview (tools/build_overview_osm.py) lie outside the region: that tool files them as "near" it
+    was = src.execute("SELECT value FROM meta WHERE key='overview_ids'").fetchone()
+    lo, hi = map(int, was[0].split('-')) if was else (0, -1)
+    for cls, name, g in src.execute("SELECT cls,name,geom FROM feat WHERE layer='place' AND name IS NOT NULL AND id NOT BETWEEN ? AND ?", (lo, hi)):
         _, _, x, y = struct.unpack_from('<iiii', g)     # one part, one point: see pack() in build_map.py
         db.execute(INSERT, (name, cls, spelled(name, detail), y / 1e6, x / 1e6, 1, OSM))
         n += 1

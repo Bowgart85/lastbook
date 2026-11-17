@@ -4,7 +4,7 @@
 
 ## Stand (2026-11-17, Branch `hessen-port`)
 
-Etappe 1 läuft mit echten Daten: Hessen-Karte am 17.11.2026 unter Windows 11 (Python 3.15.2) gebaut, in ein Small-Pack eingespielt und im Browser am PC und am iPhone geöffnet. Die Abnahmepunkte am Ende dieses Dokuments sind erfüllt bis auf Docker und einen Test bei getrenntem Internet.
+Etappe 1 läuft mit echten Daten: Hessen-Karte am 17.11.2026 unter Windows 11 (Python 3.15.2) gebaut, in ein Small-Pack eingespielt und im Browser am PC und am iPhone geöffnet. Die Abnahmepunkte am Ende dieses Dokuments sind erfüllt bis auf Docker. Test bei getrenntem Internet bestanden (17.11.2026, Server ohne Docker am PC): Karte nutzbar, Videos der Bibliothek spielbar.
 
 | Teil | Datei | Geprüft |
 |---|---|---|
@@ -18,9 +18,9 @@ Etappe 1 läuft mit echten Daten: Hessen-Karte am 17.11.2026 unter Windows 11 (P
 | Heimserver | `server.py --lan`; `packaging/docker/Dockerfile`, `compose.yaml`, `.dockerignore` | `--lan` unter Windows, iPhone im WLAN; **Docker-Image nicht gebaut** (Docker auf dem PC nicht installiert) |
 | Gelände: Relief, Höhenlinien, Höhenangaben, 3D aus Copernicus DEM GLO-30 | `tools/fetch_copernicus_dem.py`, `tools/build_terrain.py` (`--src`, `--out`), `build_region.py --terrain` | Tests; 12 echte Kacheln geladen und gebaut, Relief und Höhe im Browser |
 | Adresssuche: „Kaiserstraße 12, Buseck", auch als „Kaiserstr." oder „Kaiserstrasse" | `tools/build_addresses_osm.py`, `engine/address_search.py`, `server.py`, `build_region.py --addresses` | Tests; mit echten Daten: „Kaiserstr. 12, Buseck" |
-| Übersicht um die Region herum (Fernstraßen, Städte) für weite Zoomstufen | `tools/filter_overview_osm.py` (Auszug filtern), `tools/build_overview_osm.py` (Orte jenseits der Kante bleiben), `build_region.py --overview DATEI` | Tests; Deutschland-Auszug gefiltert und eingespielt, Raum Mainz im Browser |
+| Übersicht um die Region herum (Fernstraßen, Städte) für weite Zoomstufen | `tools/filter_overview_osm.py` (Auszug filtern), `tools/build_overview_osm.py` (Orte jenseits der Kante bleiben; mit `--places` auch in der Ortssuche, als „near Hessen"), `build_region.py --overview DATEI` | Tests; Deutschland-Auszug gefiltert und eingespielt, Raum Mainz im Browser; Suche findet „Mainz", „Aschaffenburg", „Worms", „Würzburg" |
 | Quellenangabe Copernicus auf der Karte, Kartenpanel nennt Höhenquelle und Übersicht | `server.py`, `web/map.js` | im Browser (Quellenzeile) und `/api/map/info` |
-| Tests | `app/tests/test_region_map.py` (14 Tests) | grün unter Windows |
+| Tests | `app/tests/test_region_map.py` (15 Tests) | grün unter Windows |
 
 Bestehende Tests (Stand vor dem 17.11.2026, unter Linux): 319 gelaufen, 1 Fehler in `test_setup.Recommend.test_hardware_here`. Der Test erwartet macOS oder Windows und schlägt unter Linux auch ohne diese Änderungen fehl. Unter Windows nicht erneut gelaufen.
 
@@ -76,9 +76,11 @@ Mit einem Europa-Auszug geht dasselbe; der Download ist dann 35,5 GB groß (Stan
 Nur die Übersicht erneuern, ohne die ganze Region neu zu bauen (Server vorher beenden):
 
 ```
-python3 tools/build_overview_osm.py germany-overview.osm.pbf ~/lastbook-work/out/map.sqlite
+python3 tools/build_overview_osm.py germany-overview.osm.pbf ~/lastbook-work/out/map.sqlite --places ~/lastbook-work/out/places.sqlite --label Hessen
 python3 -c "import sys, pathlib; sys.path[:0] = ['tools', '.']; import build_region as b; h = pathlib.Path.home(); w = h / 'lastbook-work'; b.install(w / 'out', h / 'LastbookData', w, 'HE', ['map.sqlite', 'places.sqlite', 'terrain.sqlite'])"
 ```
+
+Ohne `--places` stehen die Städte der Übersicht nur auf der Karte, die Suche findet sie nicht (so bis 17.11.2026, 17:45 Uhr).
 
 Lastbook muss dabei geschlossen sein. Ersetzte Dateien landen in `~/lastbook-work/replaced-<Zeit>/`.
 

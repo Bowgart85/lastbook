@@ -12,6 +12,10 @@ or town the map already names within about 10 km, so the region itself is not dr
 the region's edge is added: its cell has the region's streets, but the region map does not hold the town.
 Run again, it first removes what it added before.
 
+With --places FILE (the region's places.sqlite, made by tools/build_places_osm.py) the cities and towns it adds
+are put into the place finder too, as "near <--label>", so "Mainz" is found as well as drawn. A run with --places
+first removes the towns an earlier run put there.
+
 Give it a filtered extract, not a whole country: the reader keeps every node's position in memory.
 tools/filter_overview_osm.py makes one with the osmium Python package:
 
@@ -31,6 +35,21 @@ CELL = 0.05
 NEAR = 0.1          # degrees: a place of the same name this close in the region map is the same place
 ROADS = {'motorway': (5, 0.0005), 'trunk': (6, 0.0005), 'primary': (8, 0.0003)}     # class: (first zoom, simplify tolerance in degrees)
 PLACES = {'city': 6, 'town': 9}
+SOURCE = 'OpenStreetMap overview'      # how the place finder tells this tool's towns from the region's own
+
+
+def put_in_finder(path, towns, label):
+    """The towns added to the map, into the place finder; an earlier run's are removed first."""
+    detail = f'near {label} (OpenStreetMap)'
+    db = sqlite3.connect(path)
+    db.execute('DELETE FROM place WHERE source=?', (SOURCE,))
+    # ß as ss beside it, as tools/build_places_osm.py does: the search does not fold ß
+    db.executemany('INSERT INTO place(name,kind,detail,lat,lon,rank,source) VALUES (?,?,?,?,?,?,?)',
+                   [(name, cls, f"{detail} · {name.replace('ß', 'ss')}" if 'ß' in name else detail, lat, lon, 1, SOURCE)
+                    for cls, name, lon, lat in towns])
+    db.execute("INSERT INTO place_fts(place_fts) VALUES ('rebuild')")
+    db.commit()
+    db.close()
 
 
 def simplify(flat, tol):
@@ -70,7 +89,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('pbf', help='a filtered extract of the wider area (see above)')
     ap.add_argument('map', help='map.sqlite made by tools/build_map.py; changed in place')
+    ap.add_argument('--places', metavar='FILE', help="the region's places.sqlite: the added towns go into the place finder too")
+    ap.add_argument('--label', default='the region', help='what the region is called, for "near <label>" beside those towns')
     a = ap.parse_args()
+    if a.places and not Path(a.places).is_file():
+        sys.exit(f'{a.places} is not there: build the place finder first')
     import osmium
 
     if not Path(a.map).is_file():
@@ -92,6 +115,7 @@ def main():
         named.setdefault(name, []).append((lon, lat))
     first = fid = db.execute('SELECT COALESCE(MAX(id),0) FROM feat').fetchone()[0] + 1
     roads = places = skipped = 0
+    towns = []
 
     def add(layer, cls, name, minz, flat):
         nonlocal fid
@@ -125,13 +149,17 @@ def main():
                     minz = 5
             except ValueError:
                 pass
-            add('place', tags['place'], tags['name'], minz, [obj.location.lon, obj.location.lat])
+            add('place', tags['place'], tags['name'], minz, [lon, lat])
+            towns.append((tags['place'], tags['name'], lon, lat))
             places += 1
     db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', ('overview_ids', f'{first}-{fid - 1}'))
     db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', ('overview', f'{roads} main roads and {places} towns from {Path(a.pbf).name} (OpenStreetMap, ODbL 1.0)'))
     db.commit()
     db.close()
-    print(f'overview: {roads:,} main roads, {places:,} cities and towns added; {skipped:,} left out where the map has detail; {time.time() - t0:.0f}s', flush=True)
+    if a.places:
+        put_in_finder(a.places, towns, a.label)
+    print(f'overview: {roads:,} main roads, {places:,} cities and towns added; {skipped:,} left out where the map has detail; '
+          f'{time.time() - t0:.0f}s' + (f'; {len(towns):,} towns put into the place finder' if a.places else ''), flush=True)
 
 
 if __name__ == '__main__':

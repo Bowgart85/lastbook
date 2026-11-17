@@ -21,7 +21,8 @@ tools/regions/).
                Copernicus DEM GLO-30 (needs numpy and tifffile; imagecodecs too if a file will not open). With
                --data, the data folder's own terrain.sqlite is the starting point, so what it already shows stays.
      overview   with --overview FILE: tools/build_overview_osm.py adds main roads and towns of a wider, filtered
-               extract around the region, for when the map is zoomed out (how to make FILE: see that tool)
+               extract around the region, for when the map is zoomed out (how to make FILE: see that tool);
+               its towns go into the place finder as "near <label>"
   5 addresses  with --addresses: tools/build_addresses_osm.py -> <work>/out/addresses/<code>.sqlite, one per region
                house addresses from the raw extract, found as "Kaiserstraße 12, Buseck"
   6 install    with --data: the built files go to <data>/derived/geo/, what they replace moves to <work>/replaced-<time>/,
@@ -191,8 +192,9 @@ def main():
         if pbf and not a.no_boundaries:
             places += ['--pbf', f"{pbf}={r['label']}"]
     run(*places)
-    if a.overview:      # after the place finder, which lists the region's own places only
-        run(TOOLS / 'build_overview_osm.py', Path(a.overview).expanduser(), out / 'map.sqlite')
+    if a.overview:      # after the place finder, which files the map's places under the region; this adds its towns as "near" it
+        run(TOOLS / 'build_overview_osm.py', Path(a.overview).expanduser(), out / 'map.sqlite',
+            '--places', out / 'places.sqlite', '--label', label)
     if a.addresses:
         for r, _, pbf in got:
             print('addresses:', r['label'], flush=True)

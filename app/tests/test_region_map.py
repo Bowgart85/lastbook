@@ -388,6 +388,40 @@ class RegionMap(unittest.TestCase):
         self.assertEqual([round(v, 2) for v in box], [8.6, 8.65, 50.0, 50.1])
 
     @unittest.skipUnless(importlib.util.find_spec('osmium'), 'needs the osmium package')
+    def test_overview_towns_are_found_too(self):
+        """With --places the towns the overview adds go into the place finder, as near the region, once."""
+        import shutil
+        target = self.dir / 'finder-map.sqlite'
+        shutil.copy2(self.map, target)
+        places = self.dir / 'finder-places.sqlite'
+        r = run(ROOT / 'tools/build_places_osm.py', '--map', target, '--out', places, '--label', 'Hessen')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        osm = self.dir / 'finder-wide.osm'
+        osm.write_text('''<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+ <node id="1" version="1" lat="49.99" lon="8.27"><tag k="place" v="city"/><tag k="name" v="Mainz"/><tag k="population" v="220000"/></node>
+ <node id="2" version="1" lat="50.59" lon="8.69"><tag k="place" v="city"/><tag k="name" v="Gießen"/></node>
+ <node id="3" version="1" lat="49.79" lon="9.95"><tag k="place" v="city"/><tag k="name" v="Würzburg"/></node>
+ <node id="4" version="1" lat="49.31" lon="8.55"><tag k="place" v="town"/><tag k="name" v="Großhausen"/></node>
+</osm>
+''', encoding='utf-8')
+        for _ in range(2):                                          # the second run replaces the first one's towns
+            r = run(ROOT / 'tools/build_overview_osm.py', osm, target, '--places', places, '--label', 'Hessen')
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn('3 towns put into the place finder', r.stdout)
+        db = self.db(places)
+        self.assertEqual([h[:3] for h in self.find(db, 'Mainz')], [('Mainz', 'city', 'near Hessen (OpenStreetMap)')])
+        self.assertEqual([h[:3] for h in self.find(db, 'Grosshausen')], [('Großhausen', 'town', 'near Hessen (OpenStreetMap) · Grosshausen')])
+        self.assertEqual([h[2] for h in self.find(db, 'Gießen') if h[1] == 'city'], ['Hessen (OpenStreetMap) · Giessen'])    # the region's own, not doubled
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM place WHERE source='OpenStreetMap overview'").fetchone()[0], 3)
+        # the place finder built again from the map that now has the overview: its towns are not filed under Hessen
+        again = self.dir / 'finder-places-again.sqlite'
+        r = run(ROOT / 'tools/build_places_osm.py', '--map', target, '--out', again, '--label', 'Hessen')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.find(self.db(again), 'Mainz'), [])
+        self.assertEqual(run(ROOT / 'tools/build_overview_osm.py', osm, target, '--places', self.dir / 'none.sqlite').returncode != 0, True)
+
+    @unittest.skipUnless(importlib.util.find_spec('osmium'), 'needs the osmium package')
     def test_a_country_extract_is_cut_down_to_the_overview(self):
         """tools/filter_overview_osm.py keeps main roads with their points, cities and towns, and nothing else."""
         import osmium

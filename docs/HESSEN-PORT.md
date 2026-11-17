@@ -4,42 +4,49 @@
 
 ## Stand (2026-11-17, Branch `hessen-port`)
 
-Etappe 1 ist als Code vorhanden und mit kleinen Testdaten geprüft. **Mit echten Hessen-Daten ist noch nichts gelaufen.**
+Etappe 1 läuft mit echten Daten: Hessen-Karte am 17.11.2026 unter Windows 11 (Python 3.15.2) gebaut, in ein Small-Pack eingespielt und im Browser am PC und am iPhone geöffnet. Die Abnahmepunkte am Ende dieses Dokuments sind erfüllt bis auf Docker und einen Test bei getrenntem Internet.
 
 | Teil | Datei | Geprüft |
 |---|---|---|
-| Straßenkarte für beliebige Region | `tools/build_map.py` (neue Optionen `--source`, `--as-of`, `--bounds`; ohne Optionen unverändert) | Test + Server liefert Kacheln |
-| Ortssuche aus OSM: Orte, Hilfepunkte, PLZ, Gemeinden, Kreise; „Giessen" findet „Gießen" | `tools/build_places_osm.py` | Test + `/api/places` |
-| Ein Befehl: laden, bauen, einspielen, `map-set.json` schreiben; mehrere Regionen in einer Karte | `tools/build_region.py`, `tools/regions/*.json` (alle 16 Bundesländer), `--geofabrik` für jede andere Region | Test mit zwei Regionen über lokale Dateien; **echter Download nicht** |
-| Metrische Anzeige außerhalb der USA (Maßstab, Höhen, Höhenlinien, 3D) | `web/map.js`, `web/terrain3d.js` | nur Syntaxprüfung, **nicht im Browser** |
+| Straßenkarte für beliebige Region | `tools/build_map.py` (neue Optionen `--source`, `--as-of`, `--bounds`; ohne Optionen unverändert); gleichnamige Kreis-Punkte nur einmal | Tests; ganz Hessen gebaut und im Browser angesehen |
+| Ortssuche aus OSM: Orte, Hilfepunkte, PLZ, Gemeinden, Kreise; „Giessen" findet „Gießen" | `tools/build_places_osm.py` | Tests; mit echten Daten: „Buseck", „35418", „Giessen" |
+| Ein Befehl: laden, bauen, einspielen, `map-set.json` schreiben; mehrere Regionen in einer Karte | `tools/build_region.py`, `tools/regions/*.json` (alle 16 Bundesländer), `--geofabrik` für jede andere Region | Tests; echter Download und Einspielen für Hessen |
+| Metrische Anzeige außerhalb der USA (Maßstab, Höhen, Höhenlinien, Entfernungen, 3D) | `web/map.js`, `web/terrain3d.js` | im Browser: „1,9 km", „20 km", „410 m here"; 3D nicht angesehen |
+| Kartendatum im Kopf aus `meta.data_as_of` statt fest „25 Oct 2026" | `web/map.js` | im Browser |
+| Beschriftung: Städte vor Kreisen; deutlicheres Mittelpunktskreuz | `web/map.js` | im Browser |
 | Kartenpanel nennt die Ortsdaten der Region | `server.py` (`pack_datasets`) | `/api/map/info` |
-| Heimserver | `packaging/docker/Dockerfile`, `compose.yaml`, `.dockerignore` | Server lief mit genau diesen Dateien und Abhängigkeiten; **Image nicht gebaut** |
-| Gelände: Relief, Höhenlinien, Höhenangaben, 3D aus Copernicus DEM GLO-30 | `tools/fetch_copernicus_dem.py`, `tools/build_terrain.py` (`--src`, `--out`), `build_region.py --terrain` | Test mit künstlicher Höhenkachel, Höhe auf 0,5 m genau; Server liefert Kacheln; **echte Kacheln nicht** |
-| Adresssuche: „Kaiserstraße 12, Buseck", auch als „Kaiserstr." oder „Kaiserstrasse" | `tools/build_addresses_osm.py`, `engine/address_search.py`, `server.py`, `build_region.py --addresses` | Tests + `/api/places`; die 8 bestehenden Adresstests (US) bleiben grün |
-| Übersicht um die Region herum (Fernstraßen, Städte) für weite Zoomstufen | `tools/filter_overview_osm.py` (Auszug filtern), `tools/build_overview_osm.py`, `build_region.py --overview DATEI` | Tests; **optional, nicht Teil des Fahrplans** |
-| Quellenangabe Copernicus auf der Karte, Kartenpanel nennt Höhenquelle und Übersicht | `server.py`, `web/map.js` | `/api/map/info`; Anzeige **nicht im Browser** gesehen |
-| Tests | `app/tests/test_region_map.py` (12 Tests) | grün |
+| Heimserver | `server.py --lan`; `packaging/docker/Dockerfile`, `compose.yaml`, `.dockerignore` | `--lan` unter Windows, iPhone im WLAN; **Docker-Image nicht gebaut** (Docker auf dem PC nicht installiert) |
+| Gelände: Relief, Höhenlinien, Höhenangaben, 3D aus Copernicus DEM GLO-30 | `tools/fetch_copernicus_dem.py`, `tools/build_terrain.py` (`--src`, `--out`), `build_region.py --terrain` | Tests; 12 echte Kacheln geladen und gebaut, Relief und Höhe im Browser |
+| Adresssuche: „Kaiserstraße 12, Buseck", auch als „Kaiserstr." oder „Kaiserstrasse" | `tools/build_addresses_osm.py`, `engine/address_search.py`, `server.py`, `build_region.py --addresses` | Tests; mit echten Daten: „Kaiserstr. 12, Buseck" |
+| Übersicht um die Region herum (Fernstraßen, Städte) für weite Zoomstufen | `tools/filter_overview_osm.py` (Auszug filtern), `tools/build_overview_osm.py` (Orte jenseits der Kante bleiben), `build_region.py --overview DATEI` | Tests; Deutschland-Auszug gefiltert und eingespielt, Raum Mainz im Browser |
+| Quellenangabe Copernicus auf der Karte, Kartenpanel nennt Höhenquelle und Übersicht | `server.py`, `web/map.js` | im Browser (Quellenzeile) und `/api/map/info` |
+| Tests | `app/tests/test_region_map.py` (14 Tests) | grün unter Windows |
 
-Bestehende Tests: 319 gelaufen, 1 Fehler in `test_setup.Recommend.test_hardware_here`. Der Test erwartet macOS oder Windows und schlägt unter Linux auch ohne diese Änderungen fehl.
+Bestehende Tests (Stand vor dem 17.11.2026, unter Linux): 319 gelaufen, 1 Fehler in `test_setup.Recommend.test_hardware_here`. Der Test erwartet macOS oder Windows und schlägt unter Linux auch ohne diese Änderungen fehl. Unter Windows nicht erneut gelaufen.
 
-### Fahrplan für die Sitzung am PC (ca. 1,5 Stunden)
+### Erster Lauf am PC (17.11.2026, Windows 11, Python 3.15.2)
 
-Vorher, ohne Claude Code (läuft nebenher, kostet nur Wartezeit):
+| Schritt | Ergebnis |
+|---|---|
+| Geofabrik `hessen-latest-free.gpkg.zip`, `hessen-latest.osm.pbf` | Adressen in `tools/regions/hessen.json` stimmen; 597 MB und 348 MB |
+| Small-Pack | `Lastbook-Small-20261113.zip`, 7,69 GB; Adresse und SHA-256 aus `https://downloads.lastbook.org/manifest-v1.json`; entpackt 840 Dateien |
+| Straßenkarte | 4,6 Mio. Objekte, 46.448 Hilfepunkte, 76 bis 95 s; `map.sqlite` 858 MB |
+| Ortssuche | 47.655 Orte, 6 MB |
+| Adressen | 1.639.481 in 30 s, Ort und PLZ ergänzt in 42 s (38.192 Orte, 152.897 PLZ); `HE.sqlite` 172 MB |
+| Gelände | 12 Copernicus-Kacheln, 3.504 Kacheln in 12 s; mit dem Relief des Packs 372 MB |
+| Ganzer Lauf ohne Downloads | 138 bis 163 s |
+| Übersicht Deutschland | `germany-latest.osm.pbf` 4,88 GB; gefiltert in 47 s auf 33,7 MB (349.312 Straßen, 2.320 Orte); eingespielt 314.933 Straßen, 2.142 Orte; `map.sqlite` danach 905 MB |
+| Platz | `lastbook-work` rund 20 GB (Downloads einschließlich Pack-Zip und Deutschland-Auszug, Zwischendateien, ersetzte Dateien aus vier Läufen); `LastbookData` 8,5 GB |
 
-1. Lastbook-Pack laden: über die Lastbook-App (lastbook.org) das Small-Pack einrichten, oder ein Pack-Zip entpacken. Ergebnis: ein Ordner `LastbookData` mit `library-data/catalog.json`.
-2. Fork holen: `git clone https://github.com/Bowgart85/lastbook && cd lastbook && git checkout hessen-port`
+Funde unter Windows:
 
-Mit Claude Code, in dieser Reihenfolge. Jeder Schritt ist für sich nützlich; wenn die Zeit knapp wird, nach Schritt 4 aufhören.
+- **Gelände:** `build_region.py` übernimmt das Relief des Packs nur, wenn `out/terrain.sqlite` noch nicht existiert. Wer zuerst ohne `--data` baut, muss die Datei vor dem Lauf mit `--data` wegschieben, sonst ersetzt die Region allein das Relief des Packs.
+- **Firewall:** Beim ersten Start mit `--lan` fragt Windows nach. Wird nicht zugelassen, legt Windows Blockier-Regeln für Python an, und kein anderes Gerät kommt durch.
+- **VPN:** Mit aktivem VPN druckt der Server den Telefon-Link mit der VPN-Adresse. Fürs Heimnetz die LAN-Adresse des PC nehmen.
+- **Telefon-Link:** Nach dem ersten Aufruf mit `?key=` leitet der Server auf `/` um. Ein QR-Code aus der Adressleiste des Browsers enthält den Schlüssel dann nicht mehr. Den Link aus der Startausgabe oder aus `derived/lan-key` nehmen.
+- **Speicher:** Läuft der Server als Hintergrundprozess von Claude Code, kann Claude Code ihn bei knappem Arbeitsspeicher beenden. Dauerhaft in einem eigenen Fenster oder als Dienst starten.
 
-3. `pip install osmium shapely numpy tifffile imagecodecs` (am besten in einem venv), dann `python3 -B -m unittest app.tests.test_region_map`
-4. Kleiner Probelauf zuerst, um Download-Adressen und Laufzeit zu sehen, ohne `--terrain`:
-   `python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --no-boundaries`
-   Schlägt der Download fehl: Adressen auf download.geofabrik.de nachsehen und in `tools/regions/hessen.json` korrigieren.
-5. Voller Lauf mit Einspielen: `python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain --addresses`
-6. Server starten (Abschnitt Heimserver), Karte am PC-Browser und am iPhone prüfen: Abnahmeliste am Ende dieses Dokuments.
-7. Was auffällt, hier unter „Bekannte Lücken" notieren.
-
-### So wird die Karte gebaut
+### Neu bauen
 
 ```
 pip install osmium                      # nur für PLZ, Gemeinden, Kreise
@@ -55,20 +62,36 @@ python3 tools/build_region.py tools/regions/hessen.json tools/regions/bayern.jso
 python3 tools/build_region.py tools/regions/hessen.json --geofabrik europe/france/alsace:Elsass --work ... --data ...
 ```
 
-**Ganz Europa in Straßendetail ist nicht sinnvoll.** Jede Region bringt ihr ganzes Straßennetz mit; die US-Gesamtkarte des Originals liegt bei rund 80 GB, Europa läge in derselben Größenordnung oder darüber (nicht gemessen). Geofabrik bietet das benötigte GeoPackage außerdem nur für kleinere Gebiete an, ein großes Land muss aus seinen Teilen gebaut werden. Sinnvoll: Heimatregion plus Nachbarn in Detail. Für eine europaweite Übersicht (Fernstraßen, Städte) fehlt noch ein eigener Builder, siehe Etappe 2.
+**Ganz Europa in Straßendetail ist nicht sinnvoll.** Jede Region bringt ihr ganzes Straßennetz mit; die US-Gesamtkarte des Originals liegt bei rund 80 GB, Europa läge in derselben Größenordnung oder darüber (nicht gemessen). Geofabrik bietet das benötigte GeoPackage außerdem nur für kleinere Gebiete an, ein großes Land muss aus seinen Teilen gebaut werden. Sinnvoll: Heimatregion plus Nachbarn in Detail, außen herum die Übersicht.
 
-Optional, später: Übersicht um Hessen herum, damit die Karte herausgezoomt nicht leer ist. Dafür einmal einen Deutschland-Auszug filtern (`germany-latest.osm.pbf` von download.geofabrik.de/europe, knapp 5 GB; das Python-Paket `osmium` reicht, `osmium-tool` ist nicht nötig) und den Lauf mit `--overview` wiederholen:
+Übersicht um Hessen herum, damit die Karte herausgezoomt nicht leer ist. Dafür einmal einen Deutschland-Auszug filtern (`germany-latest.osm.pbf` von download.geofabrik.de/europe, knapp 5 GB; das Python-Paket `osmium` reicht, `osmium-tool` ist nicht nötig) und den Lauf mit `--overview` wiederholen:
 
 ```
 python3 tools/filter_overview_osm.py germany-latest.osm.pbf germany-overview.osm.pbf
 python3 tools/build_region.py tools/regions/hessen.json --work ~/lastbook-work --data /pfad/zu/LastbookData --terrain --addresses --overview germany-overview.osm.pbf
 ```
 
-Mit einem Europa-Auszug geht dasselbe; der Download ist dann sehr groß (nicht gemessen, Größenordnung 30 GB).
+Mit einem Europa-Auszug geht dasselbe; der Download ist dann 35,5 GB groß (Stand 17.11.2026). Für Hessen reicht Deutschland.
+
+Nur die Übersicht erneuern, ohne die ganze Region neu zu bauen (Server vorher beenden):
+
+```
+python3 tools/build_overview_osm.py germany-overview.osm.pbf ~/lastbook-work/out/map.sqlite
+python3 -c "import sys, pathlib; sys.path[:0] = ['tools', '.']; import build_region as b; h = pathlib.Path.home(); w = h / 'lastbook-work'; b.install(w / 'out', h / 'LastbookData', w, 'HE', ['map.sqlite', 'places.sqlite', 'terrain.sqlite'])"
+```
 
 Lastbook muss dabei geschlossen sein. Ersetzte Dateien landen in `~/lastbook-work/replaced-<Zeit>/`.
 
 ### So startet der Heimserver
+
+Ohne Docker (so läuft er am PC, Windows PowerShell):
+
+```
+cd $HOME\lastbook
+python server.py --lan --no-index --data $HOME\LastbookData
+```
+
+Mit Docker:
 
 ```
 LASTBOOK_DATA=/pfad/zu/LastbookData docker compose -f packaging/docker/compose.yaml up -d --build
@@ -77,15 +100,13 @@ docker compose -f packaging/docker/compose.yaml logs lastbook     # zeigt den Zu
 
 Auf dem iPhone einmal `http://<IP des Servers>:8890/?key=<Schlüssel>` öffnen. Der Server hat dafür bereits einen eigenen Modus (`--lan`): andere Geräte brauchen den Schlüssel einmal, danach gilt ein Cookie. Anfragen an einen Hostnamen statt an eine IP-Adresse lehnt er ab.
 
-### Als Nächstes zu prüfen (mit echten Daten)
+### Als Nächstes zu prüfen
 
-0. Öffnen sich die echten Copernicus-Kacheln mit `tifffile`? Sie sind komprimiert; dafür kann `imagecodecs` nötig sein. Stimmt die Lage auf einen halben Bildpunkt (Gipfel und Täler passen zur Straßenkarte)? Am Rand der Region endet das Relief abrupt.
-
-1. Stimmen die beiden Geofabrik-Adressen in `tools/regions/hessen.json`? Sie sind nicht verifiziert.
-2. Laufzeit und Speicher von `build_region.py` für ganz Hessen. Der PLZ-Schritt baut alle Flächen des Auszugs zusammen und kann lange dauern; falls zu langsam, vorher mit `osmium tags-filter` auf `boundary=*` eingrenzen.
-3. Karte im Browser ansehen: Startausschnitt, Beschriftung, Maßstab in km, Hilfepunkte.
-4. Docker-Image bauen und vom iPhone aus öffnen. Offen ist, ob die Web-App ohne HTTPS sauber läuft (Service Worker).
-5. Basiskarte: Ein Pack bringt eine grobe Welt- und US-Karte mit. Ob sie Deutschland in den weiten Zoomstufen brauchbar zeigt, ist ungeprüft.
+1. Docker-Image bauen (auf einem Rechner mit Docker) und vom iPhone aus öffnen.
+2. iPhone: Bedienung der Karte; „Zum Home-Bildschirm“ ohne HTTPS (Service Worker laufen auf iOS nur über HTTPS oder localhost).
+3. Stimmt das Relief auf einen halben Bildpunkt zur Straßenkarte (Gipfel und Täler)? Im Browser unauffällig, nicht nachgemessen.
+4. 3D-Ansicht mit echten Höhen.
+5. Hilfepunkte jenseits der Landesgrenze fehlen (Apotheken, Kliniken in Mainz): Die Übersicht bringt nur Fernstraßen und Städte. Dafür Nachbarländer als eigene Regionen dazubauen; Platz und Bauzeit nicht gemessen.
 
 ### Bekannte Lücken in Etappe 1
 
@@ -177,13 +198,15 @@ Verworfen: (a) die US-Builder direkt umschreiben – erschwert Updates vom Origi
 - Rohdaten nur lesen, nie verändern (Konvention des Repos).
 - Tests: `app/tests/` und `packaging/test_pack_tools.py` müssen weiter grün sein. Neue Builder bekommen Tests mit kleinen Beispieldaten.
 - Lizenzhinweise: `THIRD_PARTY_NOTICES.md` und die Quellenseite um neue Datenquellen ergänzen.
-- Speicherbedarf geschätzt, nicht gemessen: 10–20 GB Zwischendaten, 1–2 GB fertige Karte.
+- Speicherbedarf für Hessen gemessen (17.11.2026): rund 20 GB Arbeitsordner einschließlich Pack-Zip, Deutschland-Auszug und ersetzter Dateien aus vier Läufen, rund 1,5 GB fertige Karte (Straßen mit Übersicht 905 MB, Gelände 372 MB, Adressen 172 MB, Orte 6 MB).
 
 ## Offene Fragen
 
-1. Auf welchem Rechner wird gebaut, auf welchem läuft der Server (Linux-Box, Mini-PC, NAS)?
-2. Welches Bibliothekspaket (Small ≈ 8 GB, Medium, All)?
-3. Nur Hessen oder mit Randstreifen in die Nachbarländer?
+Stand 17.11.2026:
+
+1. Rechner: gebaut wird auf dem Gaming-PC (Windows 11), der Server läuft vorerst dort. Geplant ist ein Laptop als Hauptgerät (läuft mit Akku), der PC als Heimserver fürs WLAN. Für einen Stromausfall trägt nur ein Gerät mit eigener Stromversorgung. **Offen:** dauerhafter Start des Servers ohne offenes Fenster.
+2. Bibliothekspaket: Small (7,69 GB).
+3. Hessen im Detail, Deutschland als Übersicht. **Offen:** Nachbarländer im Detail (Hilfepunkte jenseits der Grenze).
 
 ## Erste Schritte für Claude Code
 

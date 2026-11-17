@@ -522,7 +522,9 @@ const MapView = (() => {
     }
     // home marker
     const home = load('mapHome', HOME); if (home) { const [hx, hy] = px(home.lat, home.lon, V); if (hx > -10 && hx < w + 10 && hy > -10 && hy < h + 10) { g.beginPath(); g.arc(hx, hy, 6, 0, 7); g.fillStyle = '#fff'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#1b5e20'; g.stroke() } }
-    g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(w / 2 - 7, h / 2); g.lineTo(w / 2 + 7, h / 2); g.moveTo(w / 2, h / 2 - 7); g.lineTo(w / 2, h / 2 + 7); g.stroke();
+    g.beginPath(); g.moveTo(w / 2 - 12, h / 2); g.lineTo(w / 2 + 12, h / 2); g.moveTo(w / 2, h / 2 - 12); g.lineTo(w / 2, h / 2 + 12);   // the map center: dark on a light rim, so it shows on forest, relief and roads alike
+    g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 5; g.stroke();
+    g.strokeStyle = 'rgba(20,20,20,.8)'; g.lineWidth = 2; g.stroke(); g.lineCap = 'butt';
     const mpp = 156543.03 * Math.cos(st.lat * Math.PI / 180) / 2 ** st.z;
     const nice = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000].find(m => m / mpp > 60) || 100000;
     const el = $('mscale'); if (el) el.innerHTML = `<span style="display:inline-block;width:${Math.round(nice / mpp)}px;border:2px solid #333;border-top:0;height:6px;vertical-align:middle"></span> ${nice >= 1000 ? nice / 1000 + ' km' : nice + ' m'}${METRIC ? '' : ' · ' + (nice / 1609.34 < 1 ? Math.round(nice * 3.281) + ' ft' : (nice / 1609.34).toFixed(nice < 5000 ? 1 : 0) + ' mi')}`;
